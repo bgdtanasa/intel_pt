@@ -9,7 +9,8 @@ INC_SUBDIRS=$(shell find $(INC_DIR) -type d)
 INC_FLAGS=$(addprefix -I,$(INC_SUBDIRS))
 
 CC=gcc
-CFLAGS=$(INC_FLAGS) -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
+CXX=gcc
+CFLAGS=$(INC_FLAGS) -m64 -static -static-libgcc -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
 
 -include $(DEPS)
 
@@ -17,7 +18,7 @@ CFLAGS=$(INC_FLAGS) -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
-	$(LINK.cc) $^ -o $@
+	$(LINK.cc) $^ -static -static-libgcc -o $@
 
 .PHONY: clean
 clean:
