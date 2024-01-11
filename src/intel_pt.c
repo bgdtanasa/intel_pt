@@ -56,13 +56,16 @@ static unsigned long long int last_ip;
 static unsigned long long int ip_decode(const unsigned char** const x, unsigned long long int* const n) {
     const unsigned char*   x_p = *x;
     unsigned long long int n_p = *n;
-    unsigned long long int ip       = 0llu;
-    unsigned char          ip_bytes = (x_p[ 0u ] >> 5u) & 0x07u;
+
+    unsigned long long int ip             = 0llu;
+    unsigned char          ip_bytes       = (x_p[ 0u ] >> 5u) & 0x07u;
+    unsigned char          update_last_ip = 1u;
 
     x_p++;
     n_p--;
     switch (ip_bytes) {
         case 0u:
+            update_last_ip = 0u;
         break;
 
         case 1u:
@@ -72,6 +75,8 @@ static unsigned long long int ip_decode(const unsigned char** const x, unsigned 
                        (((unsigned long long int) (x_p[ 0u ])) << 0llu);
                 x_p += 2llu;
                 n_p -= 2llu;
+            } else {
+                update_last_ip = 2u;
             }
         break;
 
@@ -84,6 +89,8 @@ static unsigned long long int ip_decode(const unsigned char** const x, unsigned 
                        (((unsigned long long int) (x_p[ 0u ])) <<  0llu);
                 x_p += 4llu;
                 n_p -= 4llu;
+            } else {
+                update_last_ip = 2u;
             }
         break;
 
@@ -106,6 +113,8 @@ static unsigned long long int ip_decode(const unsigned char** const x, unsigned 
                 }
                 x_p += 6llu;
                 n_p -= 6llu;
+            } else {
+                update_last_ip = 2u;
             }
         break;
 
@@ -120,6 +129,8 @@ static unsigned long long int ip_decode(const unsigned char** const x, unsigned 
                        (((unsigned long long int) (x_p[ 0u ])) <<  0llu);
                 x_p += 6llu;
                 n_p -= 6llu;
+            } else {
+                update_last_ip = 2u;
             }
         break;
 
@@ -135,15 +146,21 @@ static unsigned long long int ip_decode(const unsigned char** const x, unsigned 
                        (((unsigned long long int) (x_p[ 0u ])) <<  0llu);
                 x_p += 8llu;
                 n_p -= 8llu;
+            } else {
+                update_last_ip = 2u;
             }
         break;
 
         default:
-            fprintf(stdout, "ip_bytes = %02x\n", ip_bytes);
+            update_last_ip = 2u;
         break;
     }
-    if (ip_bytes != 0u) {
+    if (update_last_ip == 1u) {
         last_ip = ip;
+    } else if (update_last_ip == 2u) {
+        fprintf(stderr, "ip_decode error!\n");
+
+        for (;;) { }
     }
 
     *x = x_p;
@@ -275,21 +292,28 @@ decode_again:
             fprintf(stdout, "      CBR = %u\n", x[ 2u ]);
 
             x += 4llu;
-            n -= 4llu;        
+            n -= 4llu;
+            goto decode_again;
+        }
+        if ((n >= 2llu) && (((*x_16) & BEP_MASK)) == BEP) {
+            fprintf(stdout, "      BEP\n");
+
+            x += 2llu;
+            n -= 2llu;
             goto decode_again;
         }
         if ((n >= 2llu) && (((*x_16) & EXSTOP_MASK) == EXSTOP)) {
             fprintf(stdout, "EXSTOP\n");
 
             x += 2llu;
-            n -= 2llu;        
+            n -= 2llu;
             goto decode_again;
         }
         if ((n >= 2llu) && (((*x_16) & BEP_MASK) == BEP)) {
             fprintf(stdout, "BEP\n");
 
             x += 2llu;
-            n -= 2llu;        
+            n -= 2llu;
             goto decode_again;
         }
         if ((n >= 10llu) && (((*x_16) & PTW_MASK) == PTW)) {
@@ -387,6 +411,7 @@ decode_again:
 
             goto decode_again;
         }
+        // BIP
         if ((n >= 1llu) && (((*x_8) & CYC_MASK) == CYC)) {
             unsigned long long int i   = 0u;
             unsigned long long int cyc = (x[ 0u ] >> 3u) & 0x1Fu;
