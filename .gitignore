@@ -1,0 +1,6 @@
+.vscode/c_cpp_properties.json
+src/intel_pt.d
+src/intel_pt.o
+src/main.d
+src/main.o
+myperf

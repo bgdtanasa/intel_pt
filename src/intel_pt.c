@@ -363,12 +363,12 @@ decode_again:
         }
         if ((n >= 8llu) && (*x_8 == TSC)) {
             unsigned long long int tsc = (((unsigned long long int) (x[ 7u ])) << 48llu) |
-                                        (((unsigned long long int) (x[ 6u ])) << 40llu) |
-                                        (((unsigned long long int) (x[ 5u ])) << 32llu) |
-                                        (((unsigned long long int) (x[ 4u ])) << 24llu) |
-                                        (((unsigned long long int) (x[ 3u ])) << 16llu) |
-                                        (((unsigned long long int) (x[ 2u ])) <<  8llu) |
-                                        (((unsigned long long int) (x[ 1u ])) <<  0llu);
+                                         (((unsigned long long int) (x[ 6u ])) << 40llu) |
+                                         (((unsigned long long int) (x[ 5u ])) << 32llu) |
+                                         (((unsigned long long int) (x[ 4u ])) << 24llu) |
+                                         (((unsigned long long int) (x[ 3u ])) << 16llu) |
+                                         (((unsigned long long int) (x[ 2u ])) <<  8llu) |
+                                         (((unsigned long long int) (x[ 1u ])) <<  0llu);
     #if defined(PRINT_TSC)
             fprintf(stdout, "      TSC = %llu\n", tsc);
     #else
