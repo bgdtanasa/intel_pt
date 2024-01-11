@@ -318,13 +318,13 @@ decode_again:
         }
         if ((n >= 10llu) && (((*x_16) & PTW_MASK) == PTW)) {
             unsigned long long int ptw = (((unsigned long long int) (x[ 9u ])) << 56llu) |
-                                        (((unsigned long long int) (x[ 8u ])) << 48llu) |
-                                        (((unsigned long long int) (x[ 7u ])) << 40llu) |
-                                        (((unsigned long long int) (x[ 6u ])) << 32llu) |
-                                        (((unsigned long long int) (x[ 5u ])) << 24llu) |
-                                        (((unsigned long long int) (x[ 4u ])) << 16llu) |
-                                        (((unsigned long long int) (x[ 3u ])) <<  8llu) |
-                                        (((unsigned long long int) (x[ 2u ])) <<  0llu);
+                                         (((unsigned long long int) (x[ 8u ])) << 48llu) |
+                                         (((unsigned long long int) (x[ 7u ])) << 40llu) |
+                                         (((unsigned long long int) (x[ 6u ])) << 32llu) |
+                                         (((unsigned long long int) (x[ 5u ])) << 24llu) |
+                                         (((unsigned long long int) (x[ 4u ])) << 16llu) |
+                                         (((unsigned long long int) (x[ 3u ])) <<  8llu) |
+                                         (((unsigned long long int) (x[ 2u ])) <<  0llu);
     #if defined(PRINT_PTW)
             fprintf(stdout, "      PTW = %016llx\n", ptw);
     #else
