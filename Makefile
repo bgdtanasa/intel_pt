@@ -10,7 +10,7 @@ INC_FLAGS=$(addprefix -I,$(INC_SUBDIRS))
 
 CC=gcc
 CXX=gcc
-CFLAGS=$(INC_FLAGS) -m64 -static -static-libgcc -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
+CFLAGS=$(INC_FLAGS) -m64 -static -static-libgcc -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
 
 -include $(DEPS)
 
