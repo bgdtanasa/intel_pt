@@ -1,0 +1,8 @@
+.vscode
+
+resources
+
+src/*.d
+src/*.o
+
+myperf
