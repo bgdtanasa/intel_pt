@@ -1,4 +1,5 @@
 #include "proc.h"
+#include "xed.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -22,14 +23,15 @@ static void parse_pagemap(const int                    perfed_pid,
 
         if (pread(fd, &pfn, sizeof(pfn), (vaddr_a / 4096llu) * 8llu) == sizeof(pfn)) {
             fprintf(stdout,
-                    "PFN[%016llx] = %016llx :: %llx %llx %llx %016llx :: %016llx\n",
+                    "PFN[%016llx] = %016llx :: %llx %llx %llx %016llx\n",
                     vaddr_a,
                     pfn,
                     (pfn >> 63llu) & 0x01llu,
                     (pfn >> 62llu) & 0x01llu,
                     (pfn >> 61llu) & 0x01llu,
-                    (pfn >>  0llu) & 0x007FFFFFFFFFFFFFllu,
-                    ((pfn >>  0llu) & 0x007FFFFFFFFFFFFFllu) * 4096llu);
+                    (pfn >>  0llu) & 0x007FFFFFFFFFFFFFllu);
+        } else {
+            fprintf(stdout, "\n");
         }
     } else {
         fprintf(stderr,
@@ -59,15 +61,29 @@ void perfed_proc(const int perfed_pid) {
                 char x;
                 char p;
 
+                unsigned int o;
+
                 sscanf(line,
-                       "%016llx-%016llx %c%c%c%c",
+                       "%016llx-%016llx %c%c%c%c %08x",
                        &a,
                        &b,
                        &r,
                        &w,
                        &x,
-                       &p);
+                       &p,
+                       &o);
                 if (x == 'x') {
+                    while ((line[ 0u ] != '/') && (line[ 0u ] != '[')) {
+                        if (line[ 0u ] == '\n') {
+                            break;
+                        }
+                        line++;
+                    }
+                    line[ strlen(line) - 1 ] = '\0';
+                    fprintf(stdout, "%32s %08x :: ", basename(line), o);
+                    parse_dwarf(basename(line), a - o);
+                    parse_objdump(basename(line), a - o);
+
                     parse_pagemap(perfed_pid, a, b);
                 }
             } else {

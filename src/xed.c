@@ -16,30 +16,65 @@
 #include "xed-decoded-inst.h"
 #include "xed-decoded-inst-api.h"
 
-#define MAX_NO_INSTS (1000000)
+#define MAX_NO_DWARF_UNWINDS (50000llu)
+#define MAX_NO_INSTS         (2000000llu)
 
-inst_t* insts;
+dwarf_unwind_t* unwinds;
+inst_t*         insts;
 
+static unsigned long long  no_unwinds;
 static unsigned long long  no_insts;
 static xed_chip_features_t chip_features;
 static signed long long    last_inst = -1ll;
 
-static void my_xed_init(void) {
-  insts = malloc(MAX_NO_INSTS * sizeof(inst_t));
-  if (insts == NULL) {
-    fprintf(stderr, "malloc failed\n");
-  }
+static char* get_binary(const char* const xed_file) {
+  (void) (xed_file);
 
-  xed_tables_init();
-  xed_get_chip_features(&chip_features, XED_CHIP_SNOW_RIDGE);
+  return NULL;
 }
 
-static void parse_xed(const char* const xed_file) {
-  FILE* const fp = fopen(xed_file, "r");
+void parse_dwarf(const char* const xed_file, const unsigned long long int base_addr) {
+  char dwarf_file[ 256u ];
+
+  dwarf_file[ 0u ] = '\0';
+  if (xed_file != NULL) {
+    sprintf(&dwarf_file[ 0u ], "resources/%s.dwarf", xed_file);
+  }
+
+  FILE* const fp = fopen(dwarf_file, "r");
   if (fp != NULL) {
     char buffer[ 256u ];
 
-    my_xed_init();
+    for (;;) {
+      char* line = fgets(&buffer[ 0u ], ((int) (sizeof(buffer))), fp);
+      if (line != NULL) {
+      } else {
+        break;
+      }
+    }
+
+    fprintf(stdout, "no_unwinds = %9llu :: ", no_unwinds);
+    fclose(fp);
+  } else {
+    fprintf(stderr,
+            "fopen(%s) failed :: %s\n",
+            dwarf_file,
+            strerror(errno));
+  }
+}
+
+void parse_objdump(const char* const xed_file, const unsigned long long int base_addr) {
+  char obj_file[ 256u ];
+
+  obj_file[ 0u ] = '\0';
+  if (xed_file != NULL) {
+    sprintf(&obj_file[ 0u ], "resources/%s.objdump", xed_file);
+  }
+
+  FILE* const fp = fopen(obj_file, "r");
+  if (fp != NULL) {
+    char buffer[ 256u ];
+
     for (;;) {
       xed_uint8_t            inst_bytes[ XED_MAX_INSTRUCTION_BYTES ];
       unsigned int           n_bytes;
@@ -55,10 +90,11 @@ static void parse_xed(const char* const xed_file) {
       addr      = 0llu;
 
 xed_decode_inst:
-      line = fgets(&buffer[ 0u ], ((int) (sizeof(buffer))), fp);
+      line      = fgets(&buffer[ 0u ], ((int) (sizeof(buffer))), fp);
       if (line != NULL) {
         if (xed_error == XED_ERROR_NONE) {
           sscanf(line, "%llx", &addr);
+          addr += base_addr;
         } else {
 #if 0
           fprintf(stderr, "%016llx %3d :: %2u :: ", addr, xed_error, n_bytes);
@@ -68,6 +104,7 @@ xed_decode_inst:
           fprintf(stderr, "\n");
 #endif
         }
+
         while (line[ 0u ] != ' ') {
           line++;
         }
@@ -104,11 +141,13 @@ xed_decode_inst:
             const unsigned int        xedd_dec_no_ops     = xed_inst_noperands(xedd_dec);
             const unsigned int        xedd_dec_no_mem_ops = xed_decoded_inst_number_of_memory_operands(&xedd);
 
+            insts[ no_insts ].binary             = get_binary(xed_file);
+            insts[ no_insts ].base_addr          = base_addr;
             insts[ no_insts ].addr               = addr;
             insts[ no_insts ].category           = xedd_category;
             insts[ no_insts ].iclass             = xedd_iclass;
-            insts[ no_insts ].no_operands        = xedd_dec_no_ops;
-            insts[ no_insts ].no_memory_operands = xedd_dec_no_mem_ops;
+            //insts[ no_insts ].no_operands        = xedd_dec_no_ops;
+            //insts[ no_insts ].no_memory_operands = xedd_dec_no_mem_ops;
 
 #if 0
             fprintf(stdout,
@@ -171,11 +210,14 @@ xed_decode_inst:
 #endif
 
             no_insts++;
+            if (no_insts >= MAX_NO_INSTS) {
+              fprintf(stdout, "Not enough space to load the instructions\n");
+            }
           }
         } else if (xed_error == XED_ERROR_BUFFER_TOO_SHORT) {
           goto xed_decode_inst;
-        } else if (xed_error == XED_ERROR_INVALID_FOR_CHIP) {
-          // ?!?!
+        //} else if (xed_error == XED_ERROR_INVALID_FOR_CHIP) {
+        //  // ?!?!
         } else {
           fprintf(stderr, "%016llx %3d :: %2u :: ", addr, xed_error, n_bytes);
           for (unsigned int i = 0u; i < n_bytes; i++) {
@@ -188,28 +230,34 @@ xed_decode_inst:
       }
     }
 
-    fprintf(stdout, "no_insts = %12llu\n", no_insts);
+    fprintf(stdout, "no_insts = %9llu :: ", no_insts);
     fclose(fp);
   } else {
     fprintf(stderr,
             "fopen(%s) failed :: %s\n",
-            xed_file,
+            obj_file,
             strerror(errno));
   }
 }
 
 void perfed_xed(const int perfed_pid) {
-  char    exe_symlink[ 256u ];
-  char    exe_path[ 256u ];
-  ssize_t n;
+  (void) perfed_pid;
 
-  sprintf(&exe_symlink[ 0u ], "/proc/%d/exe", perfed_pid);
-  if ((n = readlink(&exe_symlink[ 0u ], &exe_path[ 0u ], sizeof(exe_path))) == -1) {
-    fprintf(stderr, "readlink failed %s\n", strerror(errno));
+  unwinds = malloc(MAX_NO_DWARF_UNWINDS * sizeof(dwarf_unwind_t));
+  if (unwinds == NULL) {
+    fprintf(stderr, "malloc failed\n");
   } else {
-    sprintf(&exe_path[ n ], "%s", ".objdump");
-    parse_xed(&exe_path[ 0u ]);
-  } 
+    fprintf(stdout, "unwinds size = %4llu MB\n", (MAX_NO_DWARF_UNWINDS * sizeof(inst_t)) / 1024llu / 1024llu);
+  }
+  insts = malloc(MAX_NO_INSTS * sizeof(inst_t));
+  if (insts == NULL) {
+    fprintf(stderr, "malloc failed\n");
+  } else {
+    fprintf(stdout, "insts size   = %4llu MB\n", (MAX_NO_INSTS * sizeof(inst_t)) / 1024llu / 1024llu);
+  }
+
+  xed_tables_init();
+  xed_get_chip_features(&chip_features, XED_CHIP_ALL); //XED_CHIP_SNOW_RIDGE);
 }
 
 void xed_find_inst(const unsigned long long addr, const unsigned int execute_inst) {
@@ -232,6 +280,9 @@ void xed_find_inst(const unsigned long long addr, const unsigned int execute_ins
     }
   }
 
+  if (addr != 0llu) {
+    fprintf(stdout, "%016llx NOT FOUND\n", addr);
+  }
   last_inst = -1ll;
 }
 
@@ -245,8 +296,10 @@ void xed_process_branches(unsigned int tnt, unsigned int tnt_len) {
 
     for (signed long long i = last_inst; i < ((signed long long) (no_insts)); i++) {
       fprintf(stdout,
-              "             %16llx :: %12s %12s :: %u ::",
+              "%16llx %16llx %16s :: %12s %12s :: %u ::",
+              insts[ i ].addr - insts[ i ].base_addr,
               insts[ i ].addr,
+              insts[ i ].binary,
               xed_category_enum_t2str(insts[ i ].category),
               xed_iclass_enum_t2str(insts[ i ].iclass),
               br);
@@ -276,8 +329,10 @@ void xed_execute_current_inst(void) {
   }
 
   fprintf(stdout,
-          "             %16llx :: %12s %12s",
+          "%16llx %16llx %16s :: %12s %12s",
+          insts[ last_inst ].addr - insts[ last_inst ].base_addr,
           insts[ last_inst ].addr,
+          insts[ last_inst ].binary,
           xed_category_enum_t2str(insts[ last_inst ].category),
           xed_iclass_enum_t2str(insts[ last_inst ].iclass));
   if ((insts[ last_inst ].category == XED_CATEGORY_COND_BR) || (insts[ last_inst ].category == XED_CATEGORY_UNCOND_BR)) {
