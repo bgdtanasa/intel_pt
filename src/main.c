@@ -12,6 +12,9 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <sys/ptrace.h>
+#include <sys/wait.h>
+#include <sys/user.h>
 
 #include <linux/hw_breakpoint.h>
 #include <linux/perf_event.h>
@@ -98,6 +101,12 @@ typedef struct {
 } sample_id_t;
 
 typedef struct {
+    __u64       id;
+    __u64       lost;
+    sample_id_t sample_id;
+} perf_record_lost_t;
+
+typedef struct {
     __u64       aux_offset;
     __u64       aux_size;
     __u64       flags;
@@ -114,6 +123,7 @@ typedef struct {
 } perf_record_switch_t;
 
 typedef union {
+    perf_record_lost_t         record_lost;
     perf_record_aux_t          record_aux;
     perf_record_itrace_start_t record_itrace_start;
     perf_record_switch_t       record_switch;
@@ -363,6 +373,35 @@ static void* perfing_main(void* args) {
                 perfed_pid,
                 perfed_cpu);
 
+        {
+            int status;
+
+            if (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1) {
+                if (waitpid(perfed_pid, &status, 0) != -1) {
+                    if (WIFSTOPPED(status)) {
+                        struct user_regs_struct regs = { 0 };
+
+                        fprintf(stdout, "ptrace sig = %s\n", strsignal(WSTOPSIG(status)));
+                        ptrace(PTRACE_GETREGS, perfed_pid, NULL, &regs);
+                        fprintf(stdout, "ptrace rip = %016llx\n", regs.rip);
+
+                        for (;;) {
+                            data_head = perf_metadata->data_head;
+                            data_tail = __atomic_load_n(&perf_metadata->data_tail, __ATOMIC_ACQUIRE);
+                            if (data_tail != data_head) {
+                                perf_metadata->aux_tail = perf_metadata->aux_head;
+                                __atomic_store_n(&perf_metadata->data_tail, data_head, __ATOMIC_RELEASE);
+                            } else {
+                                break;
+                            }
+                        }
+                        ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
+
+                    }
+                }
+            }
+        }
+
         data_buffer = (__u8*) malloc(DATA_BUFFER_SIZE * sizeof(__u8)); memset(data_buffer, 0x00, DATA_BUFFER_SIZE * sizeof(__u8));
         aux_buffer  = (__u8*) malloc(AUX_BUFFER_SIZE * sizeof(__u8));  memset(aux_buffer, 0x00, AUX_BUFFER_SIZE * sizeof(__u8));
 
@@ -385,6 +424,12 @@ static void* perfing_main(void* args) {
                     data_tail += perf_record_sz;
 
                     switch (perf_header.type) {
+                        case PERF_RECORD_LOST:
+                            fprintf(stdout,
+                                    "  RECORD_LOST :: %12llu\n",
+                                    perf_record->record_lost.lost);
+                        break;
+
                         case PERF_RECORD_AUX:
                             fprintf(stdout,
                                     "   RECORD_AUX :: %3u %3u %16llx :: %24llu\n",
@@ -420,15 +465,14 @@ static void* perfing_main(void* args) {
 
                         case PERF_RECORD_SWITCH:
                             fprintf(stdout,
-                                    "RECORD_SWITCH :: %3u %3u %24llu %12.5lf :: %24llu %12s\n",
+                                    "RECORD_SWITCH :: %3u %3u %24llu :: %24llu %12s\n",
                                     perf_record->record_switch.id.cpu,
                                     perf_record->record_switch.id.tid,
                                     perf_record->record_switch.id.time,
-                                    ((double) (perf_record->record_switch.id.time)) * tsc_factor,
                                     (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? 
                                         (last_switch_in  != 0llu) ? (perf_record->record_switch.id.time - last_switch_in)  : (0llu) :
                                         (last_switch_out != 0llu) ? (perf_record->record_switch.id.time - last_switch_out) : (0llu),
-                                    (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? " on cpu :: OFF" : "off cpu ::  ON");
+                                    (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? " on cpu -> OFF" : "off cpu -> ON");
                             if (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) {
                                 last_switch_out = perf_record->record_switch.id.time;
                             } else {
@@ -437,7 +481,10 @@ static void* perfing_main(void* args) {
                         break;
 
                         default:
-                            fprintf(stdout, "%2u\n", perf_header.type);
+                            fprintf(stdout, "RECORD_xxxxxx :: %2u\n", perf_header.type);
+                            for (;;) {
+
+                            }
                         break;
                     }
                 }
@@ -498,7 +545,7 @@ static void perfed_setup(void) {
         //perf_attrs.exclude_host   = 1;
         //perf_attrs.exclude_guest   = 1;
         //perf_attrs.use_clockid    = 1;
-        //perf_attrs.context_switch = 1;
+        perf_attrs.context_switch = 1;
         //perf_attrs.aux_output     = 1;
         //perf_attrs.clockid        = CLOCK_MONOTONIC_RAW;
 
