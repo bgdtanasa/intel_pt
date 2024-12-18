@@ -254,6 +254,8 @@ static unsigned long long int ip_decode(const unsigned char** const   x,
 unsigned long long int intel_pt_decode(const unsigned char*   x,
                                        unsigned long long int n,
                                        const double           ts) {
+  (void) (ts);
+
   const unsigned char* const x_orig = x;
 
   unsigned int*       x_32;
