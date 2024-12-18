@@ -13,7 +13,7 @@ LIB_DIR=../xed/kits/xed-install-base-2024-09-30-lin-x86-64/lib
 
 CC=gcc
 CXX=gcc
-CFLAGS=$(INC_FLAGS) -m64 -static -static-libgcc -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
+CFLAGS=$(INC_FLAGS) -m64 -static -static-libgcc -pedantic -Wall -Wextra -O0 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
 
 -include $(DEPS)
 
