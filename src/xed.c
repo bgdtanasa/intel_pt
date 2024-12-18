@@ -46,8 +46,37 @@ void parse_dwarf(const char* const xed_file, const unsigned long long int base_a
     char buffer[ 256u ];
 
     for (;;) {
-      char* line = fgets(&buffer[ 0u ], ((int) (sizeof(buffer))), fp);
+      unsigned int  addr;
+      unsigned char cfa_reg    = 0xFFu;
+      signed int    cfa_offset = 0;
+      char*         line       = fgets(&buffer[ 0u ], ((int) (sizeof(buffer))), fp);
+
       if (line != NULL) {
+        // instruction address
+        sscanf(line, "%x", &addr);
+        while ((line[ 0u ] != 'C') && (line[ 1u ] != 'F') && (line[ 2u ] != 'A') && (line[ 3u ] != '=')) {
+          line++;
+        }
+        line += 4u;
+
+        // cfa reg
+        if ((line[ 0u ] == 'R') && (line[ 1u ] == 'B') && (line[ 2u ] == 'P')) {
+          cfa_reg = 6u;
+        } else if ((line[ 0u ] == 'R') && (line[ 1u ] == 'S') && (line[ 2u ] == 'P')) {
+          cfa_reg = 7u;
+        } else {
+          // ?!?!
+        }
+        line += 3u;
+
+        // cfa offset
+        sscanf(line, "%d", &cfa_offset);
+        while (line[ 0u ] != 'R') {
+          line++;
+        }
+
+        // regs
+        fprintf(stdout, "%08x %03u %2d :: %s", addr, cfa_reg, cfa_offset, line);
       } else {
         break;
       }
