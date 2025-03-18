@@ -5,4 +5,11 @@ resources
 src/*.d
 src/*.o
 
+kmod/.*
+kmod/*.ko
+kmod/*.mod*
+kmod/*.o
+kmod/Module*
+kmod/modules*
+
 myperf
