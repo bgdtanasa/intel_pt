@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <cpuid.h>
 #include <fcntl.h>
+#include <time.h>
 
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -23,6 +24,8 @@
 #include "xed.h"
 #include "proc.h"
 #include "pmu.h"
+#include "kmod.h"
+#include "x_unwind.h"
 
 //  /sys/bus/event_source/devices/intel_pt/type
 #define INTEL_PT_TYPE              ((__u32) (12u))
@@ -373,9 +376,14 @@ static void* perfing_main(void* args) {
                 perfed_pid,
                 perfed_cpu);
 
+        // Stopping the perfed pid to flush the intel pt data and load the kernel module.
         {
-            int status;
+            struct timespec a;
+            struct timespec b;
+            int             status;
 
+            perfed_proc(perfed_pid, NULL);
+            clock_gettime(CLOCK_MONOTONIC, &a);
             if (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1) {
                 if (waitpid(perfed_pid, &status, 0) != -1) {
                     if (WIFSTOPPED(status)) {
@@ -384,6 +392,8 @@ static void* perfing_main(void* args) {
                         fprintf(stdout, "ptrace sig = %s\n", strsignal(WSTOPSIG(status)));
                         ptrace(PTRACE_GETREGS, perfed_pid, NULL, &regs);
                         fprintf(stdout, "ptrace rip = %016llx\n", regs.rip);
+                        fprintf(stdout, "ptrace rsp = %016llx\n", regs.rsp);
+                        fprintf(stdout, "ptrace rbp = %016llx\n", regs.rbp);
 
                         for (;;) {
                             data_head = perf_metadata->data_head;
@@ -395,11 +405,15 @@ static void* perfing_main(void* args) {
                                 break;
                             }
                         }
+                        kmod_load(perfed_pid);
                         ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
-
                     }
                 }
             }
+            clock_gettime(CLOCK_MONOTONIC, &b);
+            fprintf(stdout,
+                    "ptrace ts = %12lld ns\n",
+                    ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec)));
         }
 
         data_buffer = (__u8*) malloc(DATA_BUFFER_SIZE * sizeof(__u8)); memset(data_buffer, 0x00, DATA_BUFFER_SIZE * sizeof(__u8));
@@ -407,6 +421,30 @@ static void* perfing_main(void* args) {
 
         perf_record = ((perf_record_t*) (data_buffer));
         for (;;) {
+            // Periodic unwinding by stopping the perfed pid
+            {
+                struct timespec a;
+                struct timespec b;
+                int             status;
+
+                clock_gettime(CLOCK_MONOTONIC, &a);
+                if (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1) {
+                    if (waitpid(perfed_pid, &status, 0) != -1) {
+                        if (WIFSTOPPED(status)) {
+                            struct user_regs_struct regs = { 0 };
+
+                            ptrace(PTRACE_GETREGS, perfed_pid, NULL, &regs);
+                            unwind(&regs);
+                            ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
+                        }
+                    }
+                }
+                clock_gettime(CLOCK_MONOTONIC, &b);
+                fprintf(stdout,
+                        "ptrace ts = %12lld ns\n",
+                        ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec)));
+            }
+
             data_head = __atomic_load_n(&perf_metadata->data_head, __ATOMIC_ACQUIRE);
             if (data_tail + perf_header_sz <= data_head) {
                 // Replace this loop with non-temporal stores
@@ -575,7 +613,6 @@ static void perfed_setup(void) {
                          perf_metadata->aux_offset);
                 if (p != MAP_FAILED) {
                     perfed_xed(perfed_pid);
-                    perfed_proc(perfed_pid);
                     perfed_pmu(perfed_pid, perfed_cpu, perfing_fd);
                     perfed_msr();
 
