@@ -27,62 +27,135 @@ static unsigned long long  no_insts;
 static xed_chip_features_t chip_features;
 static signed long long    last_inst = -1ll;
 
-static char* get_binary(const char* const xed_file) {
-  (void) (xed_file);
+static unsigned int no_binaries;
+static char         binaries[ 50 ][ 250 ];
 
-  return NULL;
+static char* get_binary(const char* const xed_file) {
+  for (unsigned int i = 0u; i < no_binaries; i++) {
+    if (strcmp(binaries[ i ], xed_file) == 0) {
+      return &binaries[ i ][ 0u ];
+    }
+  }
+  strcpy(&binaries[ no_binaries ][ 0u ], xed_file);
+  no_binaries++;
+
+  return &binaries[ no_binaries - 1u ][ 0u ];
 }
 
 void parse_dwarf(const char* const xed_file, const unsigned long long int base_addr) {
   char dwarf_file[ 256u ];
 
+  if (strstr(xed_file, "stack") != NULL) {
+    fprintf(stdout, "\n");
+    return;
+  }
+  if (strstr(xed_file, "vsyscall") != NULL) {
+    fprintf(stdout, "\n");
+    return;
+  }
+
   dwarf_file[ 0u ] = '\0';
   if (xed_file != NULL) {
-    sprintf(&dwarf_file[ 0u ], "resources/%s.dwarf", xed_file);
+    sprintf(&dwarf_file[ 0u ], "resources/dwarf.%s", xed_file);
   }
 
   FILE* const fp = fopen(dwarf_file, "r");
   if (fp != NULL) {
-    char buffer[ 256u ];
+#define MAX_BUFFER_SZ (256u)
+    char buffer_0[ MAX_BUFFER_SZ ];
+    char buffer_1[ MAX_BUFFER_SZ ];
 
+#if 0
+    fprintf(stdout, "\n");
+#endif
     for (;;) {
-      unsigned int  addr;
-      unsigned char cfa_reg    = 0xFFu;
-      signed int    cfa_offset = 0;
-      char*         line       = fgets(&buffer[ 0u ], ((int) (sizeof(buffer))), fp);
+      unsigned long long int addr           = 0llu;
+      unsigned int           cfa_reg        = 0u;
+      signed int             cfa_reg_offset = 0;
+      unsigned int           reg_idx        = 0;
+      signed int             reg_idx_cfa    = 0;
+      unsigned int           reg_idx_reg    = 0u;
+      dwarf_reg_t            regs[ MAX_NO_REGS ];
 
-      if (line != NULL) {
-        // instruction address
-        sscanf(line, "%x", &addr);
-        while ((line[ 0u ] != 'C') && (line[ 1u ] != 'F') && (line[ 2u ] != 'A') && (line[ 3u ] != '=')) {
-          line++;
+      char* a = fgets(&buffer_0[ 0u ], ((int) (sizeof(buffer_0))), fp);
+      char* b = &buffer_1[ 0u ];
+      char* c = NULL;
+
+      if (a != NULL) {
+        int n = sscanf(a, "  0x%llx: CFA=R%u+%d: %[^\n]", &addr, &cfa_reg, &cfa_reg_offset, b);
+
+        if (n != 4) {
+          continue;
         }
-        line += 4u;
+        c = a; a = b; b = c; b[ 0u ] = '\0';
 
-        // cfa reg
-        if ((line[ 0u ] == 'R') && (line[ 1u ] == 'B') && (line[ 2u ] == 'P')) {
-          cfa_reg = 6u;
-        } else if ((line[ 0u ] == 'R') && (line[ 1u ] == 'S') && (line[ 2u ] == 'P')) {
-          cfa_reg = 7u;
+        memset(&regs[ 0u ], 0, sizeof(regs));
+reg_again:
+        n = sscanf(a, "R%u=[CFA%d]%[^\n]", &reg_idx, &reg_idx_cfa, b);
+        if ((n == 3) || ((n == 2) && (b[ 0u ] == '\0'))) {
+          regs[ reg_idx ] = (dwarf_reg_t) {
+            .rule  = REG_RULE_CFA,
+            .u     = {
+              .cfa = reg_idx_cfa
+            }
+          };
+        } else if (n <= 2) {
+          n = sscanf(a, "R%u=R%u%[^\n]", &reg_idx, &reg_idx_reg, b);
+          if ((n == 3) || ((n == 2) && (b[ 0u ] == '\0'))) {
+            regs[ reg_idx ] = (dwarf_reg_t) {
+              .rule  = REG_RULE_REG,
+              .u     = {
+                .reg = reg_idx_reg
+              }
+            };
+          } else if (n <= 1) {
+            n = sscanf(a, "R%u=X%[^\n]", &reg_idx, b);
+            if ((n == 2) || ((n == 1) && (b[ 0u ] == '\0'))) {
+              regs[ reg_idx ] = (dwarf_reg_t) {
+                .rule  = REG_RULE_UNDEFINED
+              };
+            } else {
+              continue;
+            }
+          }
         } else {
-          // ?!?!
+          continue;
         }
-        line += 3u;
-
-        // cfa offset
-        sscanf(line, "%d", &cfa_offset);
-        while (line[ 0u ] != 'R') {
-          line++;
+        c = a; a = b; b = c; b[ 0u ] = '\0';
+        if (a[ 0 ] == ',') {
+          a += 2;
+          goto reg_again;
         }
 
-        // regs
-        fprintf(stdout, "%08x %03u %2d :: %s", addr, cfa_reg, cfa_offset, line);
+        unwinds[ no_unwinds ].base_addr      = base_addr;
+        unwinds[ no_unwinds ].addr           = base_addr + addr;
+        unwinds[ no_unwinds ].cfa_reg        = cfa_reg;
+        unwinds[ no_unwinds ].cfa_reg_offset = cfa_reg_offset;
+        memcpy(&unwinds[ no_unwinds ].regs[ 0u ], &regs[ 0u ], sizeof(regs));
+        no_unwinds++;
+
+#if 0
+        fprintf(stdout, "%016llx %02u %5d :: ", base_addr + addr, cfa_reg, cfa_reg_offset);
+        for (unsigned int i = 0u; i < MAX_NO_REGS; i++) {
+          if (regs[ i ].rule == REG_RULE_CFA) {
+            fprintf(stdout, "%5d ", regs[ i ].u.cfa);
+          } else if (regs[ i ].rule == REG_RULE_REG) {
+            fprintf(stdout, "%5u ", regs[ i ].u.reg);
+          } else if (regs[ i ].rule == REG_RULE_UNDEFINED) {
+            fprintf(stdout, "%5s ", "x");
+          } else {
+            fprintf(stdout, "%5s ", "none");
+          }
+        }
+        fprintf(stdout, "%s\n", a);
+#endif
       } else {
         break;
       }
     }
 
-    fprintf(stdout, "no_unwinds = %9llu :: ", no_unwinds);
+    fprintf(stdout, "no_unwinds  = %9llu :: ", no_unwinds);
+    fprintf(stdout, "no_binaries = %9u :: ", no_binaries);
     fclose(fp);
   } else {
     fprintf(stderr,
@@ -95,9 +168,16 @@ void parse_dwarf(const char* const xed_file, const unsigned long long int base_a
 void parse_objdump(const char* const xed_file, const unsigned long long int base_addr) {
   char obj_file[ 256u ];
 
+  if (strstr(xed_file, "stack") != NULL) {
+    return;
+  }
+  if (strstr(xed_file, "vsyscall") != NULL) {
+    return;
+  }
+
   obj_file[ 0u ] = '\0';
   if (xed_file != NULL) {
-    sprintf(&obj_file[ 0u ], "resources/%s.objdump", xed_file);
+    sprintf(&obj_file[ 0u ], "resources/objdump.%s", xed_file);
   }
 
   FILE* const fp = fopen(obj_file, "r");
@@ -177,6 +257,7 @@ xed_decode_inst:
             insts[ no_insts ].iclass             = xedd_iclass;
             //insts[ no_insts ].no_operands        = xedd_dec_no_ops;
             //insts[ no_insts ].no_memory_operands = xedd_dec_no_mem_ops;
+            insts[ no_insts ].length             = xedd_length;
 
 #if 0
             fprintf(stdout,
@@ -211,6 +292,10 @@ xed_decode_inst:
                         addr + a + xedd_length,
                         b,
                         c);
+#else
+                (void) (a);
+                (void) (b);
+                (void) (c);
 #endif
               }
               if ((xedd_dec_op_name >= XED_OPERAND_REG0) && (xedd_dec_op_name <= XED_OPERAND_REG9)) {
@@ -226,6 +311,9 @@ xed_decode_inst:
 
 #if 0
                 fprintf(stdout, " :: %lx %u", a, b);
+#else
+                (void) (a);
+                (void) (b);
 #endif
               }
             }
@@ -259,9 +347,10 @@ xed_decode_inst:
       }
     }
 
-    fprintf(stdout, "no_insts = %9llu :: ", no_insts);
+    fprintf(stdout, "no_insts = %9llu\n", no_insts);
     fclose(fp);
   } else {
+    fprintf(stdout, "\n");
     fprintf(stderr,
             "fopen(%s) failed :: %s\n",
             obj_file,
@@ -303,9 +392,9 @@ void xed_find_inst(const unsigned long long addr, const unsigned int execute_ins
       return;
     }
     if (insts[ last_inst ].addr < addr) {
-        a = last_inst + 1ll;
+      a = last_inst + 1ll;
     } else {
-        b = last_inst - 1ll;
+      b = last_inst - 1ll;
     }
   }
 
@@ -372,5 +461,59 @@ void xed_execute_current_inst(void) {
     fprintf(stdout, "\n");
 
     last_inst++;
+  }
+}
+
+inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
+  signed long long int   a = 0ll;
+  signed long long int   b = ((signed long long int) (no_insts - 1llu));
+  signed long long int   m;
+  unsigned long long int x;
+  unsigned long long int y;
+
+  while (a <= b) {
+    m = (a + b) / 2ll;
+
+    x = insts[ m + 0 ].addr;
+    y = insts[ m + 1 ].addr;
+    if ((x <= addr) && (addr < y)) {
+      return &insts[ m ];
+    }
+    if (x < addr) {
+      a = m + 1ll;
+    } else {
+      b = m - 1ll;
+    }
+  }
+  return NULL;
+}
+
+dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr) {
+  signed long long int   a = 0ll;
+  signed long long int   b = ((signed long long int) (no_unwinds - 1llu));
+  signed long long int   m;
+  unsigned long long int x;
+  unsigned long long int y;
+
+  while (a <= b) {
+    m = (a + b) / 2ll;
+
+    x = unwinds[ m + 0 ].addr;
+    y = unwinds[ m + 1 ].addr;
+    if ((x <= addr) && (addr < y)) {
+      return &unwinds[ m ];
+    }
+    if (x < addr) {
+      a = m + 1ll;
+    } else {
+      b = m - 1ll;
+    }
+  }
+  return NULL;
+}
+
+void xed_unwind_link_inst_and_dwarf(void) {
+  for (unsigned long long int i = 0llu; i < no_insts; i++) {
+    insts[ i ].unwind = xed_unwind_find_dwarf(insts[ i ].addr + ((unsigned long long int) (insts[ i ].length)));
   }
 }
