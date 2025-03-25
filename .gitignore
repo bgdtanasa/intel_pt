@@ -1,5 +1,7 @@
 .vscode
 
+resources/objdump*
+resources/dwarf*
 resources
 
 src/*.d
