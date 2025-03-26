@@ -22,15 +22,15 @@ MODULE_AUTHOR("Bogdan Tanasa");
 MODULE_LICENSE("GPL");
 
 static int           perfed_pid;
-static unsigned long perfee_vma_a;
-static unsigned long perfee_vma_b;
+static unsigned long perfing_vma_a;
+static unsigned long perfing_vma_b;
 static unsigned long perfed_vma_a;
 static unsigned long perfed_vma_b;
-module_param(perfed_pid,   int,   0644);
-module_param(perfee_vma_a, ulong, 0644);
-module_param(perfee_vma_b, ulong, 0644);
-module_param(perfed_vma_a, ulong, 0644);
-module_param(perfed_vma_b, ulong, 0644);
+module_param(perfed_pid,    int,   0644);
+module_param(perfing_vma_a, ulong, 0644);
+module_param(perfing_vma_b, ulong, 0644);
+module_param(perfed_vma_a,  ulong, 0644);
+module_param(perfed_vma_b,  ulong, 0644);
 
 static struct task_struct* perfed_task;
 
@@ -105,46 +105,46 @@ static int x_init(void) {
     }
     put_task_struct(perfed_task);
 
-    // perfee
+    // perfing
     if (no_pgs >= 1u) {
-      unsigned long     perfee_addr_a = vm_mmap(NULL,
-                                                0lu,
-                                                ((unsigned long) (no_pgs * 4096u)),
-                                                PROT_READ | PROT_WRITE,
-                                                MAP_SHARED,
-                                                0lu);
-      struct mm_struct* perfee_mm     = get_task_mm(current);
+      unsigned long     perfing_addr_a = vm_mmap(NULL,
+                                                 0lu,
+                                                 ((unsigned long) (no_pgs * 4096u)),
+                                                 PROT_READ | PROT_WRITE,
+                                                 MAP_SHARED,
+                                                 0lu);
+      struct mm_struct* perfing_mm     = get_task_mm(current);
 
-      if (perfee_mm != NULL) {
-        struct vm_area_struct* perfee_vma = NULL;
+      if (perfing_mm != NULL) {
+        struct vm_area_struct* perfing_vma = NULL;
 
-        mmap_write_lock(perfee_mm);
-        perfee_vma = find_vma(perfee_mm, perfee_addr_a);
-        if (perfee_vma != NULL) {
+        mmap_write_lock(perfing_mm);
+        perfing_vma = find_vma(perfing_mm, perfing_addr_a);
+        if (perfing_vma != NULL) {
           for (unsigned int i = 0u; i < no_pgs; i++) {
-            (void) remap_pfn_range(perfee_vma,
-                                   perfee_vma->vm_start + i * 4096u,
+            (void) remap_pfn_range(perfing_vma,
+                                   perfing_vma->vm_start + i * 4096u,
                                    page_to_pfn(pgs[ i ]),
                                    4096lu,
-                                   perfee_vma->vm_page_prot);
+                                   perfing_vma->vm_page_prot);
 #if 1
-            vm_fault_t ret = handle_mm_fault(perfee_vma,
-                                             perfee_vma->vm_start + i * 4096u,
+            vm_fault_t ret = handle_mm_fault(perfing_vma,
+                                             perfing_vma->vm_start + i * 4096u,
                                              FAULT_FLAG_WRITE,
                                              NULL);
 #endif
           }
           {
-            unsigned long perfee_addr_b = perfee_addr_a + no_pgs * 4096u;
+            unsigned long perfing_addr_b = perfing_addr_a + no_pgs * 4096u;
 
-            (void) copy_to_user((void*) (perfee_vma_a), &perfee_addr_a, sizeof(perfee_addr_a));
-            (void) copy_to_user((void*) (perfee_vma_b), &perfee_addr_b, sizeof(perfee_addr_b));
-            (void) copy_to_user((void*) (perfed_vma_a), &a,             sizeof(a));
-            (void) copy_to_user((void*) (perfed_vma_b), &b,             sizeof(b));
+            (void) copy_to_user((void*) (perfing_vma_a), &perfing_addr_a, sizeof(perfing_addr_a));
+            (void) copy_to_user((void*) (perfing_vma_b), &perfing_addr_b, sizeof(perfing_addr_b));
+            (void) copy_to_user((void*) (perfed_vma_a),  &a,             sizeof(a));
+            (void) copy_to_user((void*) (perfed_vma_b),  &b,             sizeof(b));
           }
         }
-        mmap_write_unlock(perfee_mm);
-        mmput(perfee_mm);
+        mmap_write_unlock(perfing_mm);
+        mmput(perfing_mm);
       }
     } else {
       return -1;

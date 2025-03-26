@@ -10,7 +10,7 @@ static unsigned long long int cfa_regs[ MAX_NO_REGS ];
 void unwind(struct user_regs_struct* regs) {
   unsigned long long int cfa;
   inst_t*                inst;
-  dwarf_unwind_t*        dw;
+  dwarf_unwind_t*        unwind;
   struct timespec        a;
   struct timespec        b;
   unsigned int           cfa_idx = 0u;
@@ -26,28 +26,29 @@ void unwind(struct user_regs_struct* regs) {
   cfa_regs[ 16u ] = ((unsigned long long int) (regs->rip));
 
   clock_gettime(CLOCK_MONOTONIC, &a);
+  fprintf(stdout, "%2u :: RA = %016llx\n", cfa_idx, cfa_regs[ 16u ]);
 unwind_again:
-  inst = xed_unwind_find_inst(cfa_regs[ 16u ]);
-  dw   = inst->unwind;
-  if (dw != NULL) {
+  inst   = xed_unwind_find_inst(cfa_regs[ 16u ]);
+  unwind = inst->unwind;
+  if (unwind != NULL) {
 #if 0
     fprintf(stdout, "%2u :: %12s %016llx :: ", cfa_idx, inst->binary, inst->addr - inst->base_addr);
     fprintf(stdout,
             "%016llx %02u %5d :: ",
-            dw->addr - dw->base_addr,
-            dw->cfa_reg,
-            dw->cfa_reg_offset);
+            unwind->addr - unwind->base_addr,
+            unwind->cfa_reg,
+            unwind->cfa_reg_offset);
 #endif
 
     // computing cfa
     cfa_idx++;
-    cfa = perfee_vma_a + (cfa_regs[ dw->cfa_reg ] + dw->cfa_reg_offset - perfed_vma_a);
+    cfa = perfing_vma_a + (cfa_regs[ unwind->cfa_reg ] + unwind->cfa_reg_offset - perfed_vma_a);
 
     // updating cfa_regs
     for (unsigned int i = 0u; i <= 7u; i++) {
-      switch (dw->regs[ i ].rule) {
+      switch (unwind->regs[ i ].rule) {
         case REG_RULE_CFA:
-          cfa_regs[ i ] = *((unsigned long long int*) (cfa + dw->regs[ i ].u.cfa));
+          cfa_regs[ i ] = *((unsigned long long int*) (cfa + unwind->regs[ i ].u.cfa));
         break;
 
         case REG_RULE_REG:
@@ -59,9 +60,9 @@ unwind_again:
     }
 
     // computing ra
-    switch (dw->regs[ 16u ].rule) {
+    switch (unwind->regs[ 16u ].rule) {
       case REG_RULE_CFA:
-        cfa_regs[ 16u ] = *((unsigned long long int*) (cfa + dw->regs[ 16u ].u.cfa));
+        cfa_regs[ 16u ] = *((unsigned long long int*) (cfa + unwind->regs[ 16u ].u.cfa));
 
         fprintf(stdout, "%2u :: RA = %016llx\n", cfa_idx, cfa_regs[ 16u ]);
         goto unwind_again;
@@ -74,7 +75,6 @@ unwind_again:
       break;
     }
   }
-  fprintf(stdout, "\n");
   clock_gettime(CLOCK_MONOTONIC, &b);
   fprintf(stdout,
           "unwind ts = %12lld ns\n",
