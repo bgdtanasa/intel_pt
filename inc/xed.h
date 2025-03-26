@@ -7,6 +7,8 @@
 
 #define MAX_NO_REGS (17u)
 
+//#define PRINT_XED
+
 typedef enum {
   REG_RULE_NONE,
   REG_RULE_CFA,
@@ -52,9 +54,9 @@ extern inst_t*         insts;
 extern void parse_dwarf(const char* const xed_file, const unsigned long long int base_addr);
 extern void parse_objdump(const char* const xed_file, const unsigned long long int base_addr);
 extern void perfed_xed(const int perfed_pid);
-extern void xed_find_inst(const unsigned long long addr, const unsigned int execute_inst);
+extern void xed_reset_last_inst(void);
+extern void xed_find_inst(const unsigned long long addr, const unsigned int execute_last_inst);
 extern void xed_process_branches(unsigned int tnt, unsigned int tnt_len);
-extern void xed_execute_current_inst(void);
 
 extern inst_t*         xed_unwind_find_inst(const unsigned long long int addr);
 extern dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr);

@@ -42,6 +42,35 @@ static char* get_binary(const char* const xed_file) {
   return &binaries[ no_binaries - 1u ][ 0u ];
 }
 
+static void xed_execute_last_inst(void) {
+  if (last_inst == -1ll) {
+    return;
+  }
+
+#if defined(PRINT_XED)
+  fprintf(stdout,
+          "%16llx %16llx %16s :: %12s %12s",
+          insts[ last_inst ].addr - insts[ last_inst ].base_addr,
+          insts[ last_inst ].addr,
+          insts[ last_inst ].binary,
+          xed_category_enum_t2str(insts[ last_inst ].category),
+          xed_iclass_enum_t2str(insts[ last_inst ].iclass));
+#endif
+  if ((insts[ last_inst ].category == XED_CATEGORY_COND_BR) || (insts[ last_inst ].category == XED_CATEGORY_UNCOND_BR)) {
+#if defined(PRINT_XED)
+    fprintf(stdout, " ::          Jumping to %16llx\n", insts[ last_inst ].relbr_operand);
+#endif
+
+    xed_find_inst(insts[ last_inst ].relbr_operand, 1u);
+  } else {
+#if defined(PRINT_XED)
+    fprintf(stdout, "\n");
+#endif
+
+    last_inst++;
+  }
+}
+
 void parse_dwarf(const char* const xed_file, const unsigned long long int base_addr) {
   char dwarf_file[ 256u ];
 
@@ -378,16 +407,24 @@ void perfed_xed(const int perfed_pid) {
   xed_get_chip_features(&chip_features, XED_CHIP_ALL); //XED_CHIP_SNOW_RIDGE);
 }
 
-void xed_find_inst(const unsigned long long addr, const unsigned int execute_inst) {
+void xed_reset_last_inst(void) {
+  last_inst = -1ll;
+}
+
+void xed_find_inst(const unsigned long long addr, const unsigned int execute_last_inst) {
   signed long long a = 0ll;
   signed long long b = ((signed long long) (no_insts - 1llu));
+
+  if (addr == 0llu) {
+    return;
+  }
 
   while (a <= b) {
     last_inst = (a + b) / 2ll;
 
     if (insts[ last_inst ].addr == addr) {
-      if (execute_inst) {
-        xed_execute_current_inst();
+      if (execute_last_inst) {
+        xed_execute_last_inst();
       }
       return;
     }
@@ -398,9 +435,7 @@ void xed_find_inst(const unsigned long long addr, const unsigned int execute_ins
     }
   }
 
-  if (addr != 0llu) {
-    fprintf(stdout, "%016llx NOT FOUND\n", addr);
-  }
+  fprintf(stdout, "%016llx NOT FOUND\n", addr); for (;;) {}
   last_inst = -1ll;
 }
 
@@ -413,6 +448,7 @@ void xed_process_branches(unsigned int tnt, unsigned int tnt_len) {
     const unsigned int br = tnt & 0x01u;
 
     for (signed long long i = last_inst; i < ((signed long long) (no_insts)); i++) {
+#if defined(PRINT_XED)
       fprintf(stdout,
               "%16llx %16llx %16s :: %12s %12s :: %u ::",
               insts[ i ].addr - insts[ i ].base_addr,
@@ -421,46 +457,30 @@ void xed_process_branches(unsigned int tnt, unsigned int tnt_len) {
               xed_category_enum_t2str(insts[ i ].category),
               xed_iclass_enum_t2str(insts[ i ].iclass),
               br);
+#endif
       last_inst++;
 
       if ((insts[ i ].category == XED_CATEGORY_COND_BR) || (insts[ i ].category == XED_CATEGORY_UNCOND_BR)) {
         if (br == 1u) {
+#if defined(PRINT_XED)
           fprintf(stdout, "     Jumping to %16llx\n", insts[ i ].relbr_operand);
+#endif
 
           xed_find_inst(insts[ i ].relbr_operand, 1u);
         } else {
+#if defined(PRINT_XED)
           fprintf(stdout, " Not Jumping to %16llx\n", insts[ i ].relbr_operand);
+#endif
         }
         break;
       }
+#if defined(PRINT_XED)
       fprintf(stdout, "\n");
+#endif
     }
 
     tnt     >>= 1u;
     tnt_len  -= 1u;
-  }
-}
-
-void xed_execute_current_inst(void) {
-  if (last_inst == -1ll) {
-    return;
-  }
-
-  fprintf(stdout,
-          "%16llx %16llx %16s :: %12s %12s",
-          insts[ last_inst ].addr - insts[ last_inst ].base_addr,
-          insts[ last_inst ].addr,
-          insts[ last_inst ].binary,
-          xed_category_enum_t2str(insts[ last_inst ].category),
-          xed_iclass_enum_t2str(insts[ last_inst ].iclass));
-  if ((insts[ last_inst ].category == XED_CATEGORY_COND_BR) || (insts[ last_inst ].category == XED_CATEGORY_UNCOND_BR)) {
-    fprintf(stdout, " ::          Jumping to %16llx\n", insts[ last_inst ].relbr_operand);
-
-    xed_find_inst(insts[ last_inst ].relbr_operand, 1u);
-  } else {
-    fprintf(stdout, "\n");
-
-    last_inst++;
   }
 }
 
@@ -514,6 +534,8 @@ dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr) {
 
 void xed_unwind_link_inst_and_dwarf(void) {
   for (unsigned long long int i = 0llu; i < no_insts; i++) {
-    insts[ i ].unwind = xed_unwind_find_dwarf(insts[ i ].addr + ((unsigned long long int) (insts[ i ].length)));
+    const unsigned long long int addr_offset = ((unsigned long long int) (insts[ i ].length)) - 1llu;
+
+    insts[ i ].unwind = xed_unwind_find_dwarf(insts[ i ].addr + addr_offset);
   }
 }

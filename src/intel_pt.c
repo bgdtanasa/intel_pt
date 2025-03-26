@@ -47,15 +47,19 @@
 #define CYC_MASK       (0x03u)
 #define SHORT_TNT_MASK (0x01u)
 
-#define PRINT_CBR
-#define PRINT_PTW
+//#define PRINT_TSC_MTC
+//#define PRINT_BBP
+//#define PRINT_CBR
+//#define PRINT_BEP
+//#define PRINT_PTW
+//#define PRINT_MODE
 //#define PRINT_MTC
-#define PRINT_TSC
+//#define PRINT_TSC
 #define PRINT_FUP
 #define PRINT_TIP
-#define PRINT_BIP
-#define PRINT_CYC
-#define PRINT_SHORT_TNT
+//#define PRINT_BIP
+//#define PRINT_CYC
+//#define PRINT_SHORT_TNT
 
 typedef enum {
   INTEL_PT_PKT_PSB,
@@ -95,6 +99,10 @@ typedef struct {
   unsigned long long int cyc;
 } tsc_cyc_t;
 
+unsigned int intel_pt_ovf;
+unsigned int intel_pt_pge;
+unsigned int intel_pt_pgd;
+
 static intel_pt_pkt_t last_intel_pt_pkt;
 
 static unsigned int last_psb;
@@ -132,7 +140,7 @@ static unsigned int tnt_enable = 0u;
 
 static unsigned long long int ip_decode(const unsigned char** const   x,
                                         unsigned long long int* const n,
-                                        const char*                   s) {
+                                        const char* const             s) {
   const unsigned char*   x_p = *x;
   unsigned long long int n_p = *n;
 
@@ -245,8 +253,16 @@ static unsigned long long int ip_decode(const unsigned char** const   x,
   *x = x_p;
   *n = n_p;
 
+#if defined(PRINT_XED)
   fprintf(stdout, "%s %16llx\n", s, ip);
-  xed_find_inst(ip, 1u);
+#else
+  (void) s;
+#endif
+  if (ip != 0llu) {
+    xed_find_inst(ip, 1u);
+  } else {
+    xed_reset_last_inst();
+  }
 
   return ip;
 }
@@ -278,7 +294,7 @@ decode_again:
       last_psb = 1u;
       last_ip  = 0u;
 
-      fprintf(stdout, "      PSB\n");
+      //fprintf(stdout, "      PSB\n");
 
       x += 4llu;
       n -= 4llu;
@@ -294,6 +310,12 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 2llu) && (*x_16 == OVF)) {
+      intel_pt_ovf += 1u;
+      intel_pt_pge  = 0u;
+      intel_pt_pgd  = 0u;
+
+      //cyc_cnt = 0llu;
+
       fprintf(stdout, "      OVF\n");
 
       x += 2llu;
@@ -350,7 +372,11 @@ decode_again:
       prev_mtc    = ctc & 0xFFu;
       tsc_mtc_cnt = 0llu;
 
+#if defined(PRINT_TSC_MTC)
       fprintf(stdout, "  TSC_MTC :: %16x %16x\n", ctc, fast_counter);
+#else
+      (void) fast_counter;
+#endif
 
       x += 7llu;
       n -= 7llu;
@@ -361,10 +387,12 @@ decode_again:
       last_bbp      = 1u;
       last_bbp_type = (((unsigned int) (x[ 2u ])) >> 0u) & 0x1Fu;
 
+#if defined(PRINT_BBP)
       fprintf(stdout,
               "      BBP :: SZ = %8x :: TYPE    = %16x\n",
               (x[ 2u ] >> 7u) & 0x01u,
               last_bbp_type);
+#endif
 
       x += 3llu;
       n -= 3llu;
@@ -397,7 +425,7 @@ decode_again:
     if ((n >= 2llu) && (*x_16 == PSBEND)) {
       last_psb = 0u;
 
-      fprintf(stdout, "   PSBEND\n");
+      //fprintf(stdout, "   PSBEND\n");
 
       x += 2llu;
       n -= 2llu;
@@ -446,7 +474,9 @@ decode_again:
       last_bbp      = 0u;
       last_bbp_type = 0xFFFFFFFFu;
 
+#if defined(PRINT_BEP)
       fprintf(stdout, "      BEP :: IP = %8x\n", (x[ 1u ] >> 7u) & 0x01u);
+#endif
 
       x += 2llu;
       n -= 2llu;
@@ -487,6 +517,7 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 2llu) && (*x_8 == MODE)) {
+#if defined(PRINT_MODE)
       const unsigned char mode    = (x[ 1u ] >> 0u) & 0x1Fu;
       const unsigned char leaf_id = (x[ 1u ] >> 5u) & 0x07u;
 
@@ -501,6 +532,7 @@ decode_again:
       } else {
         fprintf(stdout, "     MODE\n");
       }
+#endif
 
       x += 2llu;
       n -= 2llu;
@@ -589,7 +621,7 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 1llu) && (*x_8 == PAD)) {
-      fprintf(stdout, "      PAD\n");
+      //fprintf(stdout, "      PAD\n");
 
       x += 1llu;
       n -= 1llu;
@@ -597,6 +629,7 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & TIP_PGE_MASK) == TIP_PGE)) {
+      intel_pt_pge++;
       (void) ip_decode(&x, &n, "  TIP_PGE ::");
 
       last_intel_pt_pkt = INTEL_PT_PKT_TIP_PGE;
@@ -615,6 +648,7 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & TIP_PGD_MASK) == TIP_PGD)) {
+      intel_pt_pgd++;
       (void) ip_decode(&x, &n, "  TIP_PGD ::");
 
       last_intel_pt_pkt = INTEL_PT_PKT_TIP_PGD;
@@ -634,13 +668,13 @@ decode_again:
 #if defined(PRINT_BIP)
         fprintf(stdout, "      BIP :: ID = %8x :: PAYLOAD = %16llx\n", bip_id, payload);
         if ((last_bbp_type == 0x04u) && (bip_id == 0x00u)) {
-          //xed_find_inst(payload, 0u);
+          // ?!
         }
+#endif
 
         if ((bip_id == 0x01u) && (payload == 0x100000001)) {
           tnt_enable = 1u;
         }
-#endif
 
       x += 9llu;
       n -= 9llu;
