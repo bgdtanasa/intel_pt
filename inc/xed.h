@@ -4,10 +4,12 @@
 #include "xed-types.h"
 #include "xed-category-enum.h"
 #include "xed-iclass-enum.h"
+#include "xed-reg-enum.h"
+#include "xed-operand-enum.h"
 
 #define MAX_NO_REGS (17u)
 
-//#define PRINT_XED
+#define PRINT_XED
 
 typedef enum {
   REG_RULE_NONE,
@@ -34,6 +36,16 @@ typedef struct {
 } dwarf_unwind_t;
 
 typedef struct {
+  int64_t        mem_disp;
+  xed_reg_enum_t mem_reg;
+
+  xed_operand_enum_t     op;
+  xed_reg_enum_t         op_reg;
+
+  unsigned long long int addr;
+} jmp_t;
+
+typedef struct {
   char*                  binary;
   unsigned long long int base_addr;
   unsigned long long int addr;
@@ -42,8 +54,7 @@ typedef struct {
   //unsigned int           no_operands;
   //unsigned int           no_memory_operands;
   xed_uint_t             length;
-
-  unsigned long long int relbr_operand;
+  jmp_t                  jmp_to;
 
   dwarf_unwind_t*        unwind;
 } inst_t;
@@ -52,7 +63,7 @@ extern dwarf_unwind_t* unwinds;
 extern inst_t*         insts;
 
 extern void parse_dwarf(const char* const xed_file, const unsigned long long int base_addr);
-extern void parse_objdump(const char* const xed_file, const unsigned long long int base_addr);
+extern void parse_objdump(const int perfed_pid, const char* const xed_file, const unsigned long long int base_addr);
 extern void perfed_xed(const int perfed_pid);
 extern void xed_reset_last_inst(void);
 extern void xed_find_inst(const unsigned long long addr, const unsigned int execute_last_inst);

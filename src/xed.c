@@ -6,6 +6,9 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+#include <sys/types.h>
+#include <sys/uio.h>
+
 #include "xed-build-defines.h"
 #include "xed-common-defs.h"
 #include "xed-common-hdrs.h"
@@ -29,6 +32,21 @@ static signed long long    last_inst = -1ll;
 
 static unsigned int no_binaries;
 static char         binaries[ 50 ][ 250 ];
+
+static unsigned long long int read_perfed_vm(const int perfed_pid, const unsigned long long int addr) {
+  unsigned long long int got_entry = 0llu;
+  struct iovec           local     = {
+    .iov_base = &got_entry,
+    .iov_len  = sizeof(got_entry)
+  };
+  struct iovec           remote    = {
+    .iov_base = ((void*) (addr)),
+    .iov_len  = sizeof(got_entry)
+  };
+  ssize_t                n         = process_vm_readv(perfed_pid, &local, 1, &remote, 1, 0);
+
+  return (n == -1) ? (0llu) : (got_entry);
+}
 
 static char* get_binary(const char* const xed_file) {
   for (unsigned int i = 0u; i < no_binaries; i++) {
@@ -58,10 +76,10 @@ static void xed_execute_last_inst(void) {
 #endif
   if ((insts[ last_inst ].category == XED_CATEGORY_COND_BR) || (insts[ last_inst ].category == XED_CATEGORY_UNCOND_BR)) {
 #if defined(PRINT_XED)
-    fprintf(stdout, " ::          Jumping to %16llx\n", insts[ last_inst ].relbr_operand);
+    fprintf(stdout, " ::          Jumping to %16llx\n", insts[ last_inst ].jmp_to.addr);
 #endif
 
-    xed_find_inst(insts[ last_inst ].relbr_operand, 1u);
+    xed_find_inst(insts[ last_inst ].jmp_to.addr, 1u);
   } else {
 #if defined(PRINT_XED)
     fprintf(stdout, "\n");
@@ -194,7 +212,7 @@ reg_again:
   }
 }
 
-void parse_objdump(const char* const xed_file, const unsigned long long int base_addr) {
+void parse_objdump(const int perfed_pid, const char* const xed_file, const unsigned long long int base_addr) {
   char obj_file[ 256u ];
 
   if (strstr(xed_file, "stack") != NULL) {
@@ -277,7 +295,7 @@ xed_decode_inst:
             const xed_uint_t          xedd_length         = xed_decoded_inst_get_length(&xedd);
             const xed_inst_t*         xedd_dec            = xed_decoded_inst_inst(&xedd);
             const unsigned int        xedd_dec_no_ops     = xed_inst_noperands(xedd_dec);
-            const unsigned int        xedd_dec_no_mem_ops = xed_decoded_inst_number_of_memory_operands(&xedd);
+            const xed_uint_t          xedd_dec_no_mem_ops = xed_decoded_inst_number_of_memory_operands(&xedd);
 
             insts[ no_insts ].binary             = get_binary(xed_file);
             insts[ no_insts ].base_addr          = base_addr;
@@ -288,67 +306,90 @@ xed_decode_inst:
             //insts[ no_insts ].no_memory_operands = xedd_dec_no_mem_ops;
             insts[ no_insts ].length             = xedd_length;
 
-#if 0
-            fprintf(stdout,
-                    "%016llx :: %28s :: %16s %12s :: NO_OPS = %3u NO_MEM_OPS = %3u :: %2u :: ",
-                    addr,
-                    &xed_buffer[ 0u ],
-                    xed_category_enum_t2str(xedd_category),
-                    xed_iclass_enum_t2str(xedd_iclass),
-                    xedd_dec_no_ops,
-                    xedd_dec_no_mem_ops, 
-                    xedd_length);
-#endif
+            if (xedd_category == XED_CATEGORY_CALL) {
 
-            for (unsigned int i = 0u; i < xedd_dec_no_ops; i++) {
-              const xed_operand_t*     xedd_dec_op      = xed_inst_operand(xedd_dec, i);
-              const xed_operand_enum_t xedd_dec_op_name = xed_operand_name(xedd_dec_op);
+            } else if ((xedd_category == XED_CATEGORY_COND_BR) || (xedd_category == XED_CATEGORY_UNCOND_BR)) {
+              memset(&insts[ no_insts ].jmp_to, 0, sizeof(jmp_t));
+              if (xedd_dec_no_mem_ops >= 1u) {
+                if (xed_operand_values_has_memory_displacement(&xedd)) {
+                  const xed_reg_enum_t xed_reg = xed_decoded_inst_get_reg(&xedd, xed_operand_name(xed_inst_operand(xedd_dec, 1u)));
+
+                  insts[ no_insts ].jmp_to.mem_disp = xed_decoded_inst_get_memory_displacement(&xedd, 0u);
+                  insts[ no_insts ].jmp_to.mem_reg  = xed_reg;
+                  if (xed_reg == XED_REG_RIP) {
+                    insts[ no_insts ].jmp_to.addr   = read_perfed_vm(perfed_pid, addr + insts[ no_insts ].jmp_to.mem_disp + ((int64_t) (xedd_length)));
+                  } else {
+                    // What to do in this case?!
+                  }
+                } else {
+                  // What to do in this case?!
+                }
+              } else if (xedd_dec_no_ops >= 1u) {
+                const xed_operand_enum_t xed_op = xed_operand_name(xed_inst_operand(xedd_dec, 0u));
+
+                insts[ no_insts ].jmp_to.op = xed_op;
+                if ((XED_OPERAND_REG0 <= xed_op) && (xed_op <= XED_OPERAND_REG9)) {
+                  insts[ no_insts ].jmp_to.op_reg = xed_decoded_inst_get_reg(&xedd, xed_op);
+
+                  // What to do in this case?!
+                } else if (xed_op == XED_OPERAND_RELBR) {
+                  insts[ no_insts ].jmp_to.addr   = addr + xed_decoded_inst_get_branch_displacement(&xedd) + ((int64_t) (xedd_length));
+                } else {
+                  // What to do in this case?!
+                }
+              } else {
+                // What to do in this case?!
+              }
+            }
 
 #if 0
+            if (xedd_category == XED_CATEGORY_CALL) {
               fprintf(stdout,
-                      "\n\t%28s",
-                      xed_operand_enum_t2str(xedd_dec_op_name));
-#endif
-              if (xedd_dec_op_name == XED_OPERAND_RELBR) {
-                const xed_int64_t a = xed_decoded_inst_get_branch_displacement(&xedd);
-                const xed_uint_t  b = xed_decoded_inst_get_branch_displacement_width(&xedd);
-                const xed_uint_t  c = xed_decoded_inst_get_branch_displacement_width_bits(&xedd);
+                      "\n%016llx :: %28s :: %16s %12s :: NO_OPS = %3u NO_MEM_OPS = %3u",
+                      addr,
+                      &xed_buffer[ 0u ],
+                      xed_category_enum_t2str(xedd_category),
+                      xed_iclass_enum_t2str(xedd_iclass),
+                      xedd_dec_no_ops,
+                      xedd_dec_no_mem_ops);
 
-                insts[ no_insts ].relbr_operand = addr + a + xedd_length;
-#if 0
+              for (unsigned int i = 0u; i < xedd_dec_no_ops; i++) {
+                const xed_operand_t*     xedd_dec_op      = xed_inst_operand(xedd_dec, i);
+                const xed_operand_enum_t xedd_dec_op_name = xed_operand_name(xedd_dec_op);
+
                 fprintf(stdout,
-                        " :: %016llx %2u %2u",
-                        addr + a + xedd_length,
-                        b,
-                        c);
-#else
-                (void) (a);
-                (void) (b);
-                (void) (c);
-#endif
+                        "\nOPS %2u %28s ",
+                        i,
+                        xed_operand_enum_t2str(xedd_dec_op_name));
+
+                if (xedd_dec_op_name == XED_OPERAND_MEM0) {
+                } else if ((xedd_dec_op_name >= XED_OPERAND_REG0) && (xedd_dec_op_name <= XED_OPERAND_REG9)) {
+                  fprintf(stdout, "[%s]", xed_reg_enum_t2str(xed_decoded_inst_get_reg(&xedd, xedd_dec_op_name)));
+                } else if (xedd_dec_op_name == XED_OPERAND_RELBR) {
+                  const xed_int64_t a = xed_decoded_inst_get_branch_displacement(&xedd);
+                  const xed_uint_t  b = xed_decoded_inst_get_branch_displacement_width(&xedd);
+                  const xed_uint_t  c = xed_decoded_inst_get_branch_displacement_width_bits(&xedd);
+
+                  fprintf(stdout,
+                          "[%016llx %2u %2u]",
+                          addr + a + xedd_length,
+                          b,
+                          c);
+                }
               }
-              if ((xedd_dec_op_name >= XED_OPERAND_REG0) && (xedd_dec_op_name <= XED_OPERAND_REG9)) {
-#if 0
-                fprintf(stdout, " :: %s ", xed_reg_enum_t2str(xed_decoded_inst_get_reg(&xedd, xedd_dec_op_name)));
-#endif
+              for (xed_uint_t i = 0u; i < xedd_dec_no_mem_ops; i++) {
+                if (xed_operand_values_has_memory_displacement(&xedd)) {
+                  const xed_int64_t a = xed_decoded_inst_get_memory_displacement(&xedd, i);
+                  const xed_uint_t  b = xed_decoded_inst_get_memory_displacement_width(&xedd, i);
+
+                  fprintf(stdout, "\nMEM_OPS %2u [%lx %u]", i, a, b);
+                }
               }
             }
-            for (unsigned int i = 0u; i < xedd_dec_no_mem_ops; i++) {
-              if (xed_operand_values_has_memory_displacement(&xedd)) {
-                const xed_int64_t a = xed_decoded_inst_get_memory_displacement(&xedd, i);
-                const xed_uint_t  b = xed_decoded_inst_get_memory_displacement_width(&xedd, i);
-
-#if 0
-                fprintf(stdout, " :: %lx %u", a, b);
-#else
-                (void) (a);
-                (void) (b);
 #endif
-              }
-            }
 
 #if 0
-            fprintf(stdout, "\n\t:: ");
+            fprintf(stdout, "\nINST ");
             for (unsigned int i = 0u; i < n_bytes; i++) {
               fprintf(stdout, "%02x ", inst_bytes[ i ]);
             }
@@ -412,31 +453,19 @@ void xed_reset_last_inst(void) {
 }
 
 void xed_find_inst(const unsigned long long addr, const unsigned int execute_last_inst) {
-  signed long long a = 0ll;
-  signed long long b = ((signed long long) (no_insts - 1llu));
+  inst_t* inst = xed_unwind_find_inst(addr);
 
-  if (addr == 0llu) {
-    return;
-  }
+  if (inst != NULL) {
+    last_inst = ((signed long long) (inst - &insts[ 0u ]));
 
-  while (a <= b) {
-    last_inst = (a + b) / 2ll;
-
-    if (insts[ last_inst ].addr == addr) {
-      if (execute_last_inst) {
-        xed_execute_last_inst();
-      }
-      return;
+    if (execute_last_inst) {
+      xed_execute_last_inst();
     }
-    if (insts[ last_inst ].addr < addr) {
-      a = last_inst + 1ll;
-    } else {
-      b = last_inst - 1ll;
-    }
-  }
+  } else {
+    last_inst = -1ll;
 
-  fprintf(stdout, "%016llx NOT FOUND\n", addr); for (;;) {}
-  last_inst = -1ll;
+    fprintf(stdout, "%016llx NOT FOUND\n", addr); for (;;) {}
+  }
 }
 
 void xed_process_branches(unsigned int tnt, unsigned int tnt_len) {
@@ -463,13 +492,13 @@ void xed_process_branches(unsigned int tnt, unsigned int tnt_len) {
       if ((insts[ i ].category == XED_CATEGORY_COND_BR) || (insts[ i ].category == XED_CATEGORY_UNCOND_BR)) {
         if (br == 1u) {
 #if defined(PRINT_XED)
-          fprintf(stdout, "     Jumping to %16llx\n", insts[ i ].relbr_operand);
+          fprintf(stdout, "     Jumping to %16llx\n", insts[ i ].jmp_to.addr);
 #endif
 
-          xed_find_inst(insts[ i ].relbr_operand, 1u);
+          xed_find_inst(insts[ i ].jmp_to.addr, 1u);
         } else {
 #if defined(PRINT_XED)
-          fprintf(stdout, " Not Jumping to %16llx\n", insts[ i ].relbr_operand);
+          fprintf(stdout, " Not Jumping to %16llx\n", insts[ i ].jmp_to.addr);
 #endif
         }
         break;
@@ -485,21 +514,16 @@ void xed_process_branches(unsigned int tnt, unsigned int tnt_len) {
 }
 
 inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
-  signed long long int   a = 0ll;
-  signed long long int   b = ((signed long long int) (no_insts - 1llu));
-  signed long long int   m;
-  unsigned long long int x;
-  unsigned long long int y;
+  signed long long int a = 0ll;
+  signed long long int b = ((signed long long int) (no_insts - 1llu));
+  signed long long int m;
 
   while (a <= b) {
     m = (a + b) / 2ll;
 
-    x = insts[ m + 0 ].addr;
-    y = insts[ m + 1 ].addr;
-    if ((x <= addr) && (addr < y)) {
+    if (insts[ m ].addr == addr) {
       return &insts[ m ];
-    }
-    if (x < addr) {
+    } else if (insts[ m ].addr < addr) {
       a = m + 1ll;
     } else {
       b = m - 1ll;
@@ -522,8 +546,7 @@ dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr) {
     y = unwinds[ m + 1 ].addr;
     if ((x <= addr) && (addr < y)) {
       return &unwinds[ m ];
-    }
-    if (x < addr) {
+    } else if (x < addr) {
       a = m + 1ll;
     } else {
       b = m - 1ll;
