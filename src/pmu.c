@@ -100,6 +100,7 @@ static int install_cnt(const __u64        config,
 void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt_fd) {
     int cnt_fd;
 
+    fprintf(stdout, "====== PMU ======\n");
     cnt_fd = install_cnt(FIXED_PMU_INST_RETIRED_ANY,
                          1u,
                          perfed_pid,
@@ -110,6 +111,7 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
                          perfed_pid,
                          perfed_cpu,
                          intel_pt_fd);
+    fprintf(stdout, "====== PMU ======\n");
 
     (void) (cnt_fd);
 }
