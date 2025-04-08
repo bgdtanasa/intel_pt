@@ -9,7 +9,12 @@
 
 #define MAX_NO_REGS (17u)
 
-#define PRINT_XED
+//#define PRINT_XED
+
+#define COND_BRANCH          (1u << 0u)
+#define UNCOND_DIRECT_BRANCH (1u << 1u)
+#define INDIRECT_BRANCH      (1u << 2u)
+#define FAR_TRANSFER         (1u << 3u)
 
 typedef enum {
   REG_RULE_NONE,
@@ -36,14 +41,26 @@ typedef struct {
 } dwarf_unwind_t;
 
 typedef struct {
-  int64_t        mem_disp;
-  xed_reg_enum_t mem_reg;
+  unsigned long long int addr;
+} ret_t;
 
-  xed_operand_enum_t     op;
-  xed_reg_enum_t         op_reg;
+typedef struct {
+  unsigned long long int addr;
+  ret_t                  ret_to;
+} call_t;
 
+typedef struct {
   unsigned long long int addr;
 } jmp_t;
+
+typedef struct {
+  unsigned int type;
+  union {
+    call_t c;
+    jmp_t  j;
+    ret_t  r;
+  } u;
+} cofi_t;
 
 typedef struct {
   char*                  binary;
@@ -51,10 +68,9 @@ typedef struct {
   unsigned long long int addr;
   xed_category_enum_t    category;
   xed_iclass_enum_t      iclass;
-  //unsigned int           no_operands;
-  //unsigned int           no_memory_operands;
   xed_uint_t             length;
-  jmp_t                  jmp_to;
+
+  cofi_t                 cofi;
 
   dwarf_unwind_t*        unwind;
 } inst_t;
@@ -66,8 +82,10 @@ extern void parse_dwarf(const char* const xed_file, const unsigned long long int
 extern void parse_objdump(const int perfed_pid, const char* const xed_file, const unsigned long long int base_addr);
 extern void perfed_xed(const int perfed_pid);
 extern void xed_reset_last_inst(void);
-extern void xed_find_inst(const unsigned long long addr, const unsigned int execute_last_inst);
-extern void xed_process_branches(unsigned int tnt, unsigned int tnt_len);
+extern void xed_update_last_inst(const unsigned long long addr);
+extern void xed_process_branches(const unsigned int           tnt,
+                                 const unsigned int           tnt_len,
+                                 const unsigned long long int tip);
 
 extern inst_t*         xed_unwind_find_inst(const unsigned long long int addr);
 extern dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr);

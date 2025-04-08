@@ -21,6 +21,16 @@
 
 #define MAX_NO_DWARF_UNWINDS (50000llu)
 #define MAX_NO_INSTS         (2000000llu)
+#define TIP_QUEUE_LEN        (512u)
+
+typedef struct {
+  unsigned int tnt;
+  unsigned int tnt_len;
+} tnt_t;
+
+typedef struct {
+  unsigned long long int tip;
+} tip_t;
 
 dwarf_unwind_t* unwinds;
 inst_t*         insts;
@@ -28,24 +38,38 @@ inst_t*         insts;
 static unsigned long long  no_unwinds;
 static unsigned long long  no_insts;
 static xed_chip_features_t chip_features;
-static signed long long    last_inst = -1ll;
 
 static unsigned int no_binaries;
 static char         binaries[ 50 ][ 250 ];
 
-static unsigned long long int read_perfed_vm(const int perfed_pid, const unsigned long long int addr) {
-  unsigned long long int got_entry = 0llu;
-  struct iovec           local     = {
-    .iov_base = &got_entry,
-    .iov_len  = sizeof(got_entry)
-  };
-  struct iovec           remote    = {
-    .iov_base = ((void*) (addr)),
-    .iov_len  = sizeof(got_entry)
-  };
-  ssize_t                n         = process_vm_readv(perfed_pid, &local, 1, &remote, 1, 0);
+static signed long long last_inst = -1ll;
+static tnt_t            tnt_queue[ TIP_QUEUE_LEN ];
+static unsigned int     tnt_queue_head;
+static unsigned int     tnt_queue_tail;
+static tip_t            tip_queue[ TIP_QUEUE_LEN ];
+static unsigned int     tip_queue_head;
+static unsigned int     tip_queue_tail;
 
-  return (n == -1) ? (0llu) : (got_entry);
+static unsigned long long int read_perfed_vm(const int perfed_pid, const unsigned long long int addr) {
+  unsigned long long int vm_entry = 0llu;
+  struct iovec           local    = {
+    .iov_base = &vm_entry,
+    .iov_len  = sizeof(vm_entry)
+  };
+  struct iovec           remote   = {
+    .iov_base = ((void*) (addr)),
+    .iov_len  = sizeof(vm_entry)
+  };
+  ssize_t                n        = process_vm_readv(perfed_pid, &local, 1, &remote, 1, 0);
+
+  if (n == -1) {
+    fprintf(stderr,
+            "process_vm_readv(%016llx) failed :: %s\n",
+            addr,
+            strerror(errno));
+  }
+
+  return (n == -1) ? (0llu) : (vm_entry);
 }
 
 static char* get_binary(const char* const xed_file) {
@@ -58,35 +82,6 @@ static char* get_binary(const char* const xed_file) {
   no_binaries++;
 
   return &binaries[ no_binaries - 1u ][ 0u ];
-}
-
-static void xed_execute_last_inst(void) {
-  if (last_inst == -1ll) {
-    return;
-  }
-
-#if defined(PRINT_XED)
-  fprintf(stdout,
-          "%16llx %16llx %16s :: %12s %12s",
-          insts[ last_inst ].addr - insts[ last_inst ].base_addr,
-          insts[ last_inst ].addr,
-          insts[ last_inst ].binary,
-          xed_category_enum_t2str(insts[ last_inst ].category),
-          xed_iclass_enum_t2str(insts[ last_inst ].iclass));
-#endif
-  if ((insts[ last_inst ].category == XED_CATEGORY_COND_BR) || (insts[ last_inst ].category == XED_CATEGORY_UNCOND_BR)) {
-#if defined(PRINT_XED)
-    fprintf(stdout, " ::          Jumping to %16llx\n", insts[ last_inst ].jmp_to.addr);
-#endif
-
-    xed_find_inst(insts[ last_inst ].jmp_to.addr, 1u);
-  } else {
-#if defined(PRINT_XED)
-    fprintf(stdout, "\n");
-#endif
-
-    last_inst++;
-  }
 }
 
 void parse_dwarf(const char* const xed_file, const unsigned long long int base_addr) {
@@ -213,6 +208,8 @@ reg_again:
 }
 
 void parse_objdump(const int perfed_pid, const char* const xed_file, const unsigned long long int base_addr) {
+  (void) (perfed_pid);
+
   char obj_file[ 256u ];
 
   if (strstr(xed_file, "stack") != NULL) {
@@ -282,7 +279,7 @@ xed_decode_inst:
         if (xed_error == XED_ERROR_NONE) {
           char xed_buffer[ 1024u ];
 
-          xed_buffer[ 0u ] = '\0';
+          memset(&xed_buffer[ 0u ], 0, sizeof(xed_buffer));
           if (xed_format_context(XED_SYNTAX_ATT,
                                  &xedd,
                                  &xed_buffer[ 0u ],
@@ -294,56 +291,106 @@ xed_decode_inst:
             const xed_iclass_enum_t   xedd_iclass         = xed_decoded_inst_get_iclass(&xedd);
             const xed_uint_t          xedd_length         = xed_decoded_inst_get_length(&xedd);
             const xed_inst_t*         xedd_dec            = xed_decoded_inst_inst(&xedd);
-            const unsigned int        xedd_dec_no_ops     = xed_inst_noperands(xedd_dec);
+            const unsigned int        xedd_dec_no_ops     = xed_decoded_inst_noperands(&xedd);
             const xed_uint_t          xedd_dec_no_mem_ops = xed_decoded_inst_number_of_memory_operands(&xedd);
 
-            insts[ no_insts ].binary             = get_binary(xed_file);
-            insts[ no_insts ].base_addr          = base_addr;
-            insts[ no_insts ].addr               = addr;
-            insts[ no_insts ].category           = xedd_category;
-            insts[ no_insts ].iclass             = xedd_iclass;
-            //insts[ no_insts ].no_operands        = xedd_dec_no_ops;
-            //insts[ no_insts ].no_memory_operands = xedd_dec_no_mem_ops;
-            insts[ no_insts ].length             = xedd_length;
+            memset(&insts[ no_insts ], 0, sizeof(inst_t));
+            insts[ no_insts ].binary    = get_binary(xed_file);
+            insts[ no_insts ].base_addr = base_addr;
+            insts[ no_insts ].addr      = addr;
+            insts[ no_insts ].category  = xedd_category;
+            insts[ no_insts ].iclass    = xedd_iclass;
+            insts[ no_insts ].length    = xedd_length;
 
+            if (xed_inst_get_attribute(xedd_dec, XED_ATTRIBUTE_INDIRECT_BRANCH) == 1u) {
+              insts[ no_insts ].cofi.type |= INDIRECT_BRANCH;
+            }
+            if (xed_inst_get_attribute(xedd_dec, XED_ATTRIBUTE_FAR_XFER) == 1u) {
+              insts[ no_insts ].cofi.type |= FAR_TRANSFER;
+            }
             if (xedd_category == XED_CATEGORY_CALL) {
+              if (insts[ no_insts ].cofi.type == 0u) {
+                insts[ no_insts ].cofi.type |= UNCOND_DIRECT_BRANCH;
+              }
 
-            } else if ((xedd_category == XED_CATEGORY_COND_BR) || (xedd_category == XED_CATEGORY_UNCOND_BR)) {
-              memset(&insts[ no_insts ].jmp_to, 0, sizeof(jmp_t));
               if (xedd_dec_no_mem_ops >= 1u) {
                 if (xed_operand_values_has_memory_displacement(&xedd)) {
-                  const xed_reg_enum_t xed_reg = xed_decoded_inst_get_reg(&xedd, xed_operand_name(xed_inst_operand(xedd_dec, 1u)));
+                  const xed_reg_enum_t xed_reg = xed_decoded_inst_get_base_reg(&xedd, 0u);
 
-                  insts[ no_insts ].jmp_to.mem_disp = xed_decoded_inst_get_memory_displacement(&xedd, 0u);
-                  insts[ no_insts ].jmp_to.mem_reg  = xed_reg;
                   if (xed_reg == XED_REG_RIP) {
-                    insts[ no_insts ].jmp_to.addr   = read_perfed_vm(perfed_pid, addr + insts[ no_insts ].jmp_to.mem_disp + ((int64_t) (xedd_length)));
+                    //insts[ no_insts ].cofi.u.c.addr = read_perfed_vm(perfed_pid, addr + xed_decoded_inst_get_memory_displacement(&xedd, 0u) + ((int64_t) (xedd_length)));
                   } else {
                     // What to do in this case?!
                   }
                 } else {
                   // What to do in this case?!
                 }
-              } else if (xedd_dec_no_ops >= 1u) {
+              }
+              if (xedd_dec_no_ops >= 1u) {
                 const xed_operand_enum_t xed_op = xed_operand_name(xed_inst_operand(xedd_dec, 0u));
 
-                insts[ no_insts ].jmp_to.op = xed_op;
                 if ((XED_OPERAND_REG0 <= xed_op) && (xed_op <= XED_OPERAND_REG9)) {
-                  insts[ no_insts ].jmp_to.op_reg = xed_decoded_inst_get_reg(&xedd, xed_op);
-
                   // What to do in this case?!
                 } else if (xed_op == XED_OPERAND_RELBR) {
-                  insts[ no_insts ].jmp_to.addr   = addr + xed_decoded_inst_get_branch_displacement(&xedd) + ((int64_t) (xedd_length));
+                  insts[ no_insts ].cofi.u.c.addr = addr + xed_decoded_inst_get_branch_displacement(&xedd) + ((int64_t) (xedd_length));
                 } else {
                   // What to do in this case?!
                 }
-              } else {
-                // What to do in this case?!
+              }
+              if (xedd_iclass == XED_ICLASS_CALL_NEAR) {
+                insts[ no_insts ].cofi.u.c.ret_to.addr = addr + ((int64_t) (xedd_length));
+              }
+              //fprintf(stdout,
+              //         "\nCALL = %016llx -> %016llx :: %016llx %02x",
+              //        addr,
+              //        insts[ no_insts ].cofi.u.c.addr,
+              //        insts[ no_insts ].cofi.u.c.ret_to.addr,
+              //        insts[ no_insts ].cofi.type);
+            } else if ((xedd_category == XED_CATEGORY_COND_BR) || (xedd_category == XED_CATEGORY_UNCOND_BR)) {
+              if (insts[ no_insts ].cofi.type == 0u) {
+                insts[ no_insts ].cofi.type |= (xedd_category == XED_CATEGORY_COND_BR) ? (COND_BRANCH) : (0u);
+                insts[ no_insts ].cofi.type |= (xedd_category == XED_CATEGORY_UNCOND_BR) ? (UNCOND_DIRECT_BRANCH) : (0u);
+              }
+
+              if (xedd_dec_no_mem_ops >= 1u) {
+                if (xed_operand_values_has_memory_displacement(&xedd)) {
+                  const xed_reg_enum_t xed_reg = xed_decoded_inst_get_base_reg(&xedd, 0u);
+
+                  if (xed_reg == XED_REG_RIP) {
+                    //insts[ no_insts ].cofi.u.j.addr = read_perfed_vm(perfed_pid, addr + xed_decoded_inst_get_memory_displacement(&xedd, 0u) + ((int64_t) (xedd_length)));
+                  } else {
+                    // What to do in this case?!
+                  }
+                } else {
+                  // What to do in this case?!
+                }
+              }
+              if (xedd_dec_no_ops >= 1u) {
+                const xed_operand_enum_t xed_op = xed_operand_name(xed_inst_operand(xedd_dec, 0u));
+
+                if ((XED_OPERAND_REG0 <= xed_op) && (xed_op <= XED_OPERAND_REG9)) {
+                  // What to do in this case?!
+                } else if (xed_op == XED_OPERAND_RELBR) {
+                  insts[ no_insts ].cofi.u.j.addr = addr + xed_decoded_inst_get_branch_displacement(&xedd) + ((int64_t) (xedd_length));
+                } else {
+                  // What to do in this case?!
+                }
+              }
+              //fprintf(stdout, "\nJMP  = %016llx -> %016llx %02x", addr, insts[ no_insts ].cofi.u.j.addr, insts[ no_insts ].cofi.type);
+            } else if (xedd_category == XED_CATEGORY_RET) {
+              if (insts[ no_insts ].cofi.type == 0u) {
+                insts[ no_insts ].cofi.type |= INDIRECT_BRANCH;
+              }
+
+              //fprintf(stdout, "\nRET %02x", insts[ no_insts ].cofi.type);
+            } else if (xedd_category == XED_CATEGORY_SYSCALL) {
+              if (insts[ no_insts ].cofi.type == 0u) {
+                insts[ no_insts ].cofi.type |= FAR_TRANSFER;
               }
             }
 
 #if 0
-            if (xedd_category == XED_CATEGORY_CALL) {
+            if (1) {//if (xedd_category == XED_CATEGORY_CALL) {
               fprintf(stdout,
                       "\n%016llx :: %28s :: %16s %12s :: NO_OPS = %3u NO_MEM_OPS = %3u",
                       addr,
@@ -352,40 +399,7 @@ xed_decode_inst:
                       xed_iclass_enum_t2str(xedd_iclass),
                       xedd_dec_no_ops,
                       xedd_dec_no_mem_ops);
-
-              for (unsigned int i = 0u; i < xedd_dec_no_ops; i++) {
-                const xed_operand_t*     xedd_dec_op      = xed_inst_operand(xedd_dec, i);
-                const xed_operand_enum_t xedd_dec_op_name = xed_operand_name(xedd_dec_op);
-
-                fprintf(stdout,
-                        "\nOPS %2u %28s ",
-                        i,
-                        xed_operand_enum_t2str(xedd_dec_op_name));
-
-                if (xedd_dec_op_name == XED_OPERAND_MEM0) {
-                } else if ((xedd_dec_op_name >= XED_OPERAND_REG0) && (xedd_dec_op_name <= XED_OPERAND_REG9)) {
-                  fprintf(stdout, "[%s]", xed_reg_enum_t2str(xed_decoded_inst_get_reg(&xedd, xedd_dec_op_name)));
-                } else if (xedd_dec_op_name == XED_OPERAND_RELBR) {
-                  const xed_int64_t a = xed_decoded_inst_get_branch_displacement(&xedd);
-                  const xed_uint_t  b = xed_decoded_inst_get_branch_displacement_width(&xedd);
-                  const xed_uint_t  c = xed_decoded_inst_get_branch_displacement_width_bits(&xedd);
-
-                  fprintf(stdout,
-                          "[%016llx %2u %2u]",
-                          addr + a + xedd_length,
-                          b,
-                          c);
-                }
               }
-              for (xed_uint_t i = 0u; i < xedd_dec_no_mem_ops; i++) {
-                if (xed_operand_values_has_memory_displacement(&xedd)) {
-                  const xed_int64_t a = xed_decoded_inst_get_memory_displacement(&xedd, i);
-                  const xed_uint_t  b = xed_decoded_inst_get_memory_displacement_width(&xedd, i);
-
-                  fprintf(stdout, "\nMEM_OPS %2u [%lx %u]", i, a, b);
-                }
-              }
-            }
 #endif
 
 #if 0
@@ -450,17 +464,16 @@ void perfed_xed(const int perfed_pid) {
 
 void xed_reset_last_inst(void) {
   last_inst = -1ll;
+
+  tnt_queue_head = tnt_queue_tail = 0u;
+  tip_queue_head = tip_queue_tail = 0u;
 }
 
-void xed_find_inst(const unsigned long long addr, const unsigned int execute_last_inst) {
+void xed_update_last_inst(const unsigned long long addr) {
   inst_t* inst = xed_unwind_find_inst(addr);
 
   if (inst != NULL) {
     last_inst = ((signed long long) (inst - &insts[ 0u ]));
-
-    if (execute_last_inst) {
-      xed_execute_last_inst();
-    }
   } else {
     last_inst = -1ll;
 
@@ -468,48 +481,139 @@ void xed_find_inst(const unsigned long long addr, const unsigned int execute_las
   }
 }
 
-void xed_process_branches(unsigned int tnt, unsigned int tnt_len) {
-  if (last_inst == -1ll) {
-    return;
+void xed_process_branches(const unsigned int           tnt,
+                          const unsigned int           tnt_len,
+                          const unsigned long long int tip) {
+#if defined(PRINT_XED)
+  static unsigned long long int n = 0llu;
+#endif
+
+  tnt_t* x_tnt = NULL;
+  tip_t* x_tip = NULL;
+
+  if (tnt_len >= 1u) {
+    const unsigned int tnt_queue_head_next = (tnt_queue_head + 1u) % TIP_QUEUE_LEN;
+
+    if (tnt_queue_head_next != tnt_queue_tail) {
+      tnt_queue[ tnt_queue_head ] = (tnt_t) {
+        .tnt     = tnt,
+        .tnt_len = tnt_len
+      };
+      tnt_queue_head              = tnt_queue_head_next;
+    } else {
+      fprintf(stderr, "BR Queue full!\n"); for (;;) {}
+    }
+  }
+  if (tip != 0llu) {
+    const unsigned int tip_queue_head_next = (tip_queue_head + 1u) % TIP_QUEUE_LEN;
+
+    if (tip_queue_head_next != tip_queue_tail) {
+      tip_queue[ tip_queue_head ] = (tip_t) {
+        .tip = tip
+      };
+      tip_queue_head              = tip_queue_head_next;
+    } else {
+      fprintf(stderr, "TIP Queue full!\n"); for (;;) {}
+    }
   }
 
-  while (tnt_len >= 1u) {
-    const unsigned int br = tnt & 0x01u;
-
-    for (signed long long i = last_inst; i < ((signed long long) (no_insts)); i++) {
+  for (;;) {
 #if defined(PRINT_XED)
-      fprintf(stdout,
-              "%16llx %16llx %16s :: %12s %12s :: %u ::",
-              insts[ i ].addr - insts[ i ].base_addr,
-              insts[ i ].addr,
-              insts[ i ].binary,
-              xed_category_enum_t2str(insts[ i ].category),
-              xed_iclass_enum_t2str(insts[ i ].iclass),
-              br);
+    fprintf(stdout,
+            "\n%10llu :: %16llx %16llx %16s :: %12s %12s :: %02x :: %4u %4u :: %4u %4u",
+            n++,
+            insts[ last_inst ].addr - insts[ last_inst ].base_addr,
+            insts[ last_inst ].addr,
+            insts[ last_inst ].binary,
+            xed_category_enum_t2str(insts[ last_inst ].category),
+            xed_iclass_enum_t2str(insts[ last_inst ].iclass),
+            insts[ last_inst ].cofi.type,
+            tnt_queue_head,
+            tnt_queue_tail,
+            tip_queue_head,
+            tip_queue_tail);
 #endif
+
+    if (insts[ last_inst ].cofi.type == 0u) {
       last_inst++;
+    } else {
+      if (tnt_queue_tail != tnt_queue_head) {
+        x_tnt = &tnt_queue[ tnt_queue_tail ];
+        if (x_tnt->tnt_len == 0u) {
+          tnt_queue_tail = (tnt_queue_tail + 1u) % TIP_QUEUE_LEN;
+          if (tnt_queue_tail != tnt_queue_head) {
+            x_tnt = &tnt_queue[ tnt_queue_tail ];
+          } else {
+            x_tnt = NULL;
+          }
+        }
+      } else {
+        x_tnt = NULL;
+      }
+      if (tip_queue_tail != tip_queue_head) {
+        x_tip = &tip_queue[ tip_queue_tail ];
+      } else {
+        x_tip = NULL;
+      }
 
-      if ((insts[ i ].category == XED_CATEGORY_COND_BR) || (insts[ i ].category == XED_CATEGORY_UNCOND_BR)) {
-        if (br == 1u) {
+      if ((insts[ last_inst ].cofi.type & COND_BRANCH) != 0u) {
+        if (x_tnt != NULL) {
+          const unsigned int br = x_tnt->tnt & (1 << (x_tnt->tnt_len - 1u));
+
+          x_tnt->tnt_len--;
+          if (br != 0u) {
 #if defined(PRINT_XED)
-          fprintf(stdout, "     Jumping to %16llx\n", insts[ i ].jmp_to.addr);
+            fprintf(stdout, " -> %16llx", insts[ last_inst ].cofi.u.j.addr);
 #endif
-
-          xed_find_inst(insts[ i ].jmp_to.addr, 1u);
+            xed_update_last_inst(insts[ last_inst ].cofi.u.j.addr);
+          } else {
+            last_inst++;
+          }
         } else {
 #if defined(PRINT_XED)
-          fprintf(stdout, " Not Jumping to %16llx\n", insts[ i ].jmp_to.addr);
+          fprintf(stdout, "\n");
 #endif
+          return;
         }
-        break;
-      }
+      } else if ((insts[ last_inst ].cofi.type & UNCOND_DIRECT_BRANCH) != 0u) {
+        if (insts[ last_inst ].category == XED_CATEGORY_CALL) {
 #if defined(PRINT_XED)
-      fprintf(stdout, "\n");
+          fprintf(stdout, " -> %16llx", insts[ last_inst ].cofi.u.c.addr);
 #endif
+          xed_update_last_inst(insts[ last_inst ].cofi.u.c.addr);
+        } else if (insts[ last_inst ].category == XED_CATEGORY_UNCOND_BR) {
+#if defined(PRINT_XED)
+          fprintf(stdout, " -> %16llx", insts[ last_inst ].cofi.u.j.addr);
+#endif
+          xed_update_last_inst(insts[ last_inst ].cofi.u.j.addr);
+        } else {
+          // What to do in this case?!
+        }
+      } else if ((insts[ last_inst ].cofi.type & INDIRECT_BRANCH) != 0u) {
+        if (x_tip != NULL) {
+          if (insts[ last_inst ].category == XED_CATEGORY_CALL) {
+          } else if (insts[ last_inst ].category == XED_CATEGORY_UNCOND_BR) {
+          } else if (insts[ last_inst ].category == XED_CATEGORY_RET) {
+          } else {
+            // What to do in this case?!
+          }
+#if defined(PRINT_XED)
+          fprintf(stdout, " -> %16llx", x_tip->tip);
+#endif
+          xed_update_last_inst(x_tip->tip);
+          tip_queue_tail = (tip_queue_tail + 1u) % TIP_QUEUE_LEN;
+        } else {
+#if defined(PRINT_XED)
+          fprintf(stdout, "\n");
+#endif
+          return;
+        }
+      } else if ((insts[ last_inst ].cofi.type & FAR_TRANSFER) != 0u) {
+        last_inst++;
+      } else {
+        fprintf(stdout, "Unknown cofi type\n"); for (;;) {}
+      }
     }
-
-    tnt     >>= 1u;
-    tnt_len  -= 1u;
   }
 }
 

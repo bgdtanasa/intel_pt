@@ -47,19 +47,24 @@
 #define CYC_MASK       (0x03u)
 #define SHORT_TNT_MASK (0x01u)
 
-//#define PRINT_TSC_MTC
-//#define PRINT_BBP
-//#define PRINT_CBR
-//#define PRINT_BEP
-//#define PRINT_PTW
-//#define PRINT_MODE
-//#define PRINT_MTC
-//#define PRINT_TSC
+#if 1
+#define PRINT_PSB
+#define PRINT_TSC_MTC
+#define PRINT_BBP
+#define PRINT_PSBEND
+#define PRINT_CBR
+#define PRINT_BEP
+#define PRINT_PTW
+#define PRINT_MODE
+#define PRINT_MTC
+#define PRINT_TSC
+#define PRINT_PAD
 #define PRINT_FUP
 #define PRINT_TIP
-//#define PRINT_BIP
-//#define PRINT_CYC
-//#define PRINT_SHORT_TNT
+#define PRINT_BIP
+#define PRINT_CYC
+#define PRINT_SHORT_TNT
+#endif
 
 typedef enum {
   INTEL_PT_PKT_PSB,
@@ -136,23 +141,25 @@ unsigned long long int        cbr_hz;
 double                        tsc_factor;
 double                        cbr_factor;
 
-static unsigned int tnt_enable = 0u;
+static unsigned int xed_enable = 0u;
 
 static unsigned long long int ip_decode(const unsigned char** const   x,
                                         unsigned long long int* const n,
-                                        const char* const             s) {
+                                        const char* const             s,
+                                        const unsigned int            p) {
   const unsigned char*   x_p = *x;
   unsigned long long int n_p = *n;
 
   unsigned long long int ip             = 0llu;
   const unsigned char    ip_bytes       = (x_p[ 0u ] >> 5u) & 0x07u;
-  unsigned char          update_last_ip = 1u;
+  unsigned char          ip_compressed  = ((ip_bytes == 3u) || ((ip_bytes == 6u))) ? (0u) : (1u);
+  unsigned char          last_ip_update = 1u;
 
   x_p++;
   n_p--;
   switch (ip_bytes) {
     case 0u:
-      update_last_ip = 0u;
+      last_ip_update = 0u;
     break;
 
     case 1u:
@@ -163,7 +170,7 @@ static unsigned long long int ip_decode(const unsigned char** const   x,
         x_p += 2llu;
         n_p -= 2llu;
       } else {
-        update_last_ip = 2u;
+        last_ip_update = 2u;
       }
     break;
 
@@ -177,7 +184,7 @@ static unsigned long long int ip_decode(const unsigned char** const   x,
         x_p += 4llu;
         n_p -= 4llu;
       } else {
-        update_last_ip = 2u;
+        last_ip_update = 2u;
       }
     break;
 
@@ -201,7 +208,7 @@ static unsigned long long int ip_decode(const unsigned char** const   x,
         x_p += 6llu;
         n_p -= 6llu;
       } else {
-        update_last_ip = 2u;
+        last_ip_update = 2u;
       }
     break;
 
@@ -217,8 +224,11 @@ static unsigned long long int ip_decode(const unsigned char** const   x,
         x_p += 6llu;
         n_p -= 6llu;
       } else {
-        update_last_ip = 2u;
+        last_ip_update = 2u;
       }
+    break;
+
+    case 5u:
     break;
 
     case 6u:
@@ -234,33 +244,45 @@ static unsigned long long int ip_decode(const unsigned char** const   x,
         x_p += 8llu;
         n_p -= 8llu;
       } else {
-        update_last_ip = 2u;
+        last_ip_update = 2u;
       }
     break;
 
+    case 7u:
+    break;
+
     default:
-      update_last_ip = 2u;
+      last_ip_update = 2u;
     break;
   }
-  if (update_last_ip == 1u) {
+  if (last_ip_update == 1u) {
     last_ip = ip;
-  } else if (update_last_ip == 2u) {
-    fprintf(stderr, "ip_decode error!\n");
-
-    for (;;) { }
+  } else if (last_ip_update >= 1u) {
+    fprintf(stderr, "ip_decode error :: ip_bytes = %u\n", ip_bytes); for (;;) { }
   }
 
   *x = x_p;
   *n = n_p;
 
-#if defined(PRINT_XED)
-  fprintf(stdout, "%s %16llx\n", s, ip);
+#if defined(PRINT_TIP)
+  fprintf(stdout, "%s %16llx %u\n", s, ip, ip_compressed);
 #else
-  (void) s;
+  (void) (s);
+  (void) (ip_compressed);
 #endif
-  if (ip != 0llu) {
-    xed_find_inst(ip, 1u);
+  if ((ip != 0llu) || (p == TIP_PGD)) {
+    if (p == TIP_PGE) {
+      if (xed_enable == 1u) {
+        xed_enable = 2u;
+        xed_update_last_inst(ip);
+      }
+    } else if (p == TIP) {
+      if (xed_enable == 2u) {
+        xed_process_branches(0u, 0u, ip);
+      }
+    }
   } else {
+    xed_enable = 0u;
     xed_reset_last_inst();
   }
 
@@ -285,16 +307,22 @@ unsigned long long int intel_pt_decode(const unsigned char*   x,
 
 decode_again:
   if (n >= 1llu) {
-    //fprintf(stdout, "%12llu :: ", n);
+    //fprintf(stdout, "\tn = %12llu :: ", n);
 
     x_32 = ((unsigned int*) (x));
     x_16 = ((unsigned short int*) (x));
     x_8  = ((unsigned char*) (x));
     if ((n >= 4llu) && (*x_32 == PSB)) {
+      intel_pt_ovf = 0u;
+      intel_pt_pge = 0u;
+      intel_pt_pgd = 0u;
+
       last_psb = 1u;
       last_ip  = 0u;
 
-      //fprintf(stdout, "      PSB\n");
+#if defined(PRINT_PSB)
+      fprintf(stdout, "      PSB\n");
+#endif
 
       x += 4llu;
       n -= 4llu;
@@ -313,8 +341,7 @@ decode_again:
       intel_pt_ovf += 1u;
       intel_pt_pge  = 0u;
       intel_pt_pgd  = 0u;
-
-      //cyc_cnt = 0llu;
+      xed_enable    = 0u;
 
       fprintf(stdout, "      OVF\n");
 
@@ -423,9 +450,12 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 2llu) && (*x_16 == PSBEND)) {
-      last_psb = 0u;
+      last_psb   = 0u;
+      xed_enable = (xed_enable == 0u) ? (1u) : (xed_enable);
 
-      //fprintf(stdout, "   PSBEND\n");
+#if defined(PRINT_PSBEND)
+      fprintf(stdout, "   PSBEND\n");
+#endif
 
       x += 2llu;
       n -= 2llu;
@@ -621,7 +651,9 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 1llu) && (*x_8 == PAD)) {
-      //fprintf(stdout, "      PAD\n");
+#if defined(PRINT_PAD)
+      fprintf(stdout, "      PAD\n");
+#endif
 
       x += 1llu;
       n -= 1llu;
@@ -630,26 +662,26 @@ decode_again:
     }
     if ((n >= 1llu) && (((*x_8) & TIP_PGE_MASK) == TIP_PGE)) {
       intel_pt_pge++;
-      (void) ip_decode(&x, &n, "  TIP_PGE ::");
+      (void) ip_decode(&x, &n, "  TIP_PGE ::", TIP_PGE);
 
       last_intel_pt_pkt = INTEL_PT_PKT_TIP_PGE;
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & FUP_MASK) == FUP)) {
-      (void) ip_decode(&x, &n, "      FUP ::");
+      (void) ip_decode(&x, &n, "      FUP ::", FUP);
 
       last_intel_pt_pkt = INTEL_PT_PKT_FUP;
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & TIP_MASK) == TIP)) {
-      (void) ip_decode(&x, &n, "      TIP ::");
+      (void) ip_decode(&x, &n, "      TIP ::", TIP);
 
       last_intel_pt_pkt = INTEL_PT_PKT_TIP;
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & TIP_PGD_MASK) == TIP_PGD)) {
       intel_pt_pgd++;
-      (void) ip_decode(&x, &n, "  TIP_PGD ::");
+      (void) ip_decode(&x, &n, "  TIP_PGD ::", TIP_PGD);
 
       last_intel_pt_pkt = INTEL_PT_PKT_TIP_PGD;
       goto decode_again;
@@ -667,13 +699,9 @@ decode_again:
 
 #if defined(PRINT_BIP)
         fprintf(stdout, "      BIP :: ID = %8x :: PAYLOAD = %16llx\n", bip_id, payload);
-        if ((last_bbp_type == 0x04u) && (bip_id == 0x00u)) {
-          // ?!
-        }
 #endif
 
         if ((bip_id == 0x01u) && (payload == 0x100000001)) {
-          tnt_enable = 1u;
         }
 
       x += 9llu;
@@ -726,14 +754,16 @@ cyc_again:
 
 #if defined(PRINT_SHORT_TNT)
       fprintf(stdout,
-              "SHORT_TNT :: %02x :: %u %02x\n",
+              "SHORT_TNT :: %02x :: %02x %u\n",
               short_tnt,
-              p_one,
-              (short_tnt >> 1u) & ((1u << (p_one - 1u)) - 1u));
+              (short_tnt >> 1u) & ((1u << (p_one - 1u)) - 1u),
+              p_one - 1u);
 #endif
 
-      if (tnt_enable == 1u) {
-        xed_process_branches((short_tnt >> 1u) & ((1u << (p_one - 1u)) - 1u), p_one - 1u);
+      if (xed_enable == 2u) {
+        xed_process_branches((short_tnt >> 1u) & ((1u << (p_one - 1u)) - 1u),
+                             p_one - 1u,
+                             0llu);
       }
 
       x += 1llu;
