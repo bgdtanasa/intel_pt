@@ -26,19 +26,16 @@ void unwind(struct user_regs_struct* regs) {
   cfa_regs[ 16u ] = ((unsigned long long int) (regs->rip));
 
   clock_gettime(CLOCK_MONOTONIC, &a);
-  fprintf(stdout, "%2u :: RA = %016llx\n", cfa_idx, cfa_regs[ 16u ]);
 unwind_again:
   inst   = xed_unwind_find_inst(cfa_regs[ 16u ]);
   unwind = inst->unwind;
   if (unwind != NULL) {
-#if 0
-    fprintf(stdout, "%2u :: %12s %016llx :: ", cfa_idx, inst->binary, inst->addr - inst->base_addr);
     fprintf(stdout,
-            "%016llx %02u %5d :: ",
-            unwind->addr - unwind->base_addr,
-            unwind->cfa_reg,
-            unwind->cfa_reg_offset);
-#endif
+            "%2u :: \e[0;32mRA = %016llx\e[0m :: %12s %016llx\n",
+            cfa_idx,
+            cfa_regs[ 16u ],
+            inst->binary,
+            inst->addr - inst->base_addr);
 
     // computing cfa
     cfa_idx++;
@@ -63,8 +60,6 @@ unwind_again:
     switch (unwind->regs[ 16u ].rule) {
       case REG_RULE_CFA:
         cfa_regs[ 16u ] = *((unsigned long long int*) (cfa + unwind->regs[ 16u ].u.cfa));
-
-        fprintf(stdout, "%2u :: RA = %016llx\n", cfa_idx, cfa_regs[ 16u ]);
         goto unwind_again;
       break;
 

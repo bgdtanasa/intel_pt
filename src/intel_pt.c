@@ -47,7 +47,7 @@
 #define CYC_MASK       (0x03u)
 #define SHORT_TNT_MASK (0x01u)
 
-#if 1
+#if 0
 #define PRINT_PSB
 #define PRINT_TSC_MTC
 #define PRINT_BBP

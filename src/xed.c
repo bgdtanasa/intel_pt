@@ -50,6 +50,7 @@ static tip_t            tip_queue[ TIP_QUEUE_LEN ];
 static unsigned int     tip_queue_head;
 static unsigned int     tip_queue_tail;
 
+#if 0
 static unsigned long long int read_perfed_vm(const int perfed_pid, const unsigned long long int addr) {
   unsigned long long int vm_entry = 0llu;
   struct iovec           local    = {
@@ -71,6 +72,7 @@ static unsigned long long int read_perfed_vm(const int perfed_pid, const unsigne
 
   return (n == -1) ? (0llu) : (vm_entry);
 }
+#endif
 
 static char* get_binary(const char* const xed_file) {
   for (unsigned int i = 0u; i < no_binaries; i++) {
