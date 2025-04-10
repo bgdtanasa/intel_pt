@@ -39,10 +39,10 @@
 #define INTEL_PT_CONFIG_CYC        ((__u64) (1llu <<  1llu))
 #define INTEL_PT_CONFIG_PWR_EVT    ((__u64) (1llu <<  4llu))
 #define INTEL_PT_CONFIG_FUP_ON_PTW ((__u64) (0llu <<  5llu))
-#define INTEL_PT_CONFIG_MTC        ((__u64) (1llu <<  9llu))
+#define INTEL_PT_CONFIG_MTC        ((__u64) (0llu <<  9llu))
 #define INTEL_PT_CONFIG_TSC        ((__u64) (1llu << 10llu))
 #define INTEL_PT_CONFIG_NORETCOMP  ((__u64) (1llu << 11llu))
-#define INTEL_PT_CONFIG_PTW        ((__u64) (1llu << 12llu))
+#define INTEL_PT_CONFIG_PTW        ((__u64) (0llu << 12llu))
 #define INTEL_PT_CONFIG_BRANCH     ((__u64) (1llu << 13llu))
 #define INTEL_PT_CONFIG_MTC_PERIOD ((__u64) (0llu << 14llu))
 #define INTEL_PT_CONFIG_CYC_THRESH ((__u64) (0llu << 19llu))
@@ -173,8 +173,11 @@ unsigned long long int tsc_hz;
 unsigned long long int tsc_ratio;
 unsigned long long int bus_hz;
 
-static __u64 last_switch_out;
+static __u64 switch_ref;
+static __u64 switch_in;
+static __u64 switch_out;
 static __u64 last_switch_in;
+static __u64 last_switch_out;
 
 #if 0
 static void perfed_msr(void) {
@@ -399,7 +402,6 @@ static void* perfing_main(void* args) {
         struct timespec a;
         struct timespec b;
         struct timespec c;
-        struct timespec d;
         signed long long int ts_0 = 0ll;
         signed long long int ts_1 = 0ll;
         signed long long int ts_2 = 0ll;
@@ -447,11 +449,12 @@ static void* perfing_main(void* args) {
         perf_record = ((perf_record_t*) (data_buffer));
         ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
         for (;;) {
-            double aux_util = ((double) (aux_bytes)) / ((double) (aux_size));
+            double aux_util    = ((double) (aux_bytes)) / ((double) (aux_size));
+            double switch_util = 0.0f;
 
             clock_gettime(CLOCK_MONOTONIC, &a);
             // Periodic unwinding by stopping the perfed pid
-            if ((aux_util >= 0.01f) && (perfed_is_stopped == 0u)) {
+            if ((aux_util >= 0.07f) && (perfed_is_stopped == 0u)) {
                 long ret;
                 int  status;
 
@@ -462,24 +465,15 @@ static void* perfing_main(void* args) {
                 } else {
                     if (waitpid(perfed_pid, &status, 0) != -1) {
                         if (WIFSTOPPED(status)) {
-                            struct user_regs_struct regs = { 0 };
-
-                            errno = 0;
-                            ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &regs);
-                            if (ret == -1l) {
-                                fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno));
-                            } else {
-                                unwind(&regs);
-                            }
-
-                            d                 = a;
                             perfed_is_stopped = 1u;
+
+                            clock_gettime(CLOCK_MONOTONIC, &b);
+                            ts_0 = ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec));
+                            fprintf(stdout, "attach ts = %12lld ns\n", ts_0);
                         }
                     }
                 }
             }
-            clock_gettime(CLOCK_MONOTONIC, &b);
-            ts_0 = ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec));
 
             data_head = __atomic_load_n(&perf_metadata->data_head, __ATOMIC_ACQUIRE);
             if (data_tail + perf_header_sz <= data_head) {
@@ -509,33 +503,41 @@ static void* perfing_main(void* args) {
                         break;
 
                         case PERF_RECORD_AUX:
-                            if ((aux_util >= 0.30f) && (perfed_is_stopped == 1u)) {
-                                long ret;
+#if 1
+                            if ((aux_util >= 0.80f) && (perfed_is_stopped == 1u)) {
+                                struct user_regs_struct regs = { 0 };
+                                long                    ret;
 
+                                errno = 0;
+                                ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &regs);
+                                if (ret == -1l) {
+                                    fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno));
+                                } else {
+                                    unwind(&regs);
+                                }
                                 errno = 0;
                                 ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
                                 if (ret == -1l) {
                                     fprintf(stderr, "PTRACE_DETACH failed %s\n", strerror(errno));
                                 }
+
                                 aux_bytes         = 0llu;
                                 perfed_is_stopped = 0u;
                                 clock_gettime(CLOCK_MONOTONIC, &c);
-                                ts_2 = ((signed long long) (c.tv_sec - d.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - d.tv_nsec));
+                                ts_2 = ((signed long long) (c.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - a.tv_nsec));
                             }
+#endif
 
                             no_record_aux += 1u;
                             aux_bytes     += perf_record->record_aux.aux_size;
                             fprintf(stdout,
-                                    "   RECORD_AUX :: %3u %3u :: %24llu %04llx :: %6u %12.5lf :: [%8lld ns %8lld us %8lld ms]\n",
+                                    "   RECORD_AUX :: %3u %3u \e[0;31m%12llu\e[0m %04llx :: \e[0;31m%12.5lf\e[0m %6u\n",
                                     perf_record->record_aux.id.cpu,
                                     perf_record->record_aux.id.tid,
                                     perf_record->record_aux.aux_size,
                                     perf_record->record_aux.flags,
-                                    no_record_aux,
                                     aux_util,
-                                    ts_0,
-                                    ts_1 / 1000ll,
-                                    ts_2 / 1000000ll);
+                                    no_record_aux);
 
                             if (perf_record->record_aux.flags == 0llu) {
                                 __u64 j   = 0llu;
@@ -589,22 +591,32 @@ static void* perfing_main(void* args) {
                         break;
 
                         case PERF_RECORD_SWITCH:
+                            switch_ref = perf_record->record_switch.id.time;
+                            if (no_record_switch == 0u) {
+                                switch_in       = 0llu;
+                                last_switch_out = switch_ref;
+                                switch_out      = 0llu;
+                                last_switch_in  = switch_ref;
+                                switch_util = 0.0f;
+                            } else {
+                                if (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) {
+                                    switch_in       += switch_ref - last_switch_in;
+                                    last_switch_out  = switch_ref;
+                                } else {
+                                    switch_out      += switch_ref - last_switch_out;
+                                    last_switch_in   = switch_ref;
+                                }
+                                switch_util = ((double) (switch_in)) / ((double) (switch_in + switch_out));
+                            }
+
                             no_record_switch++;
                             fprintf(stdout,
-                                    "RECORD_SWITCH :: %3u %3u %24llu :: %24llu %14s :: %6u\n",
+                                    "RECORD_SWITCH :: %3u %3u \e[0;31m%12.5lf\e[0m %14s :: %6u\n",
                                     perf_record->record_switch.id.cpu,
                                     perf_record->record_switch.id.tid,
-                                    perf_record->record_switch.id.time,
-                                    (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ?
-                                        (last_switch_in  != 0llu) ? (perf_record->record_switch.id.time - last_switch_in)  : (0llu) :
-                                        (last_switch_out != 0llu) ? (perf_record->record_switch.id.time - last_switch_out) : (0llu),
-                                    (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? " on cpu -> OFF" : "off cpu -> ON",
+                                    switch_util,
+                                    (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? ("ON  -> OFF") : ("OFF ->  ON"),
                                     no_record_switch);
-                            if (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) {
-                                last_switch_out = perf_record->record_switch.id.time;
-                            } else {
-                                last_switch_in  = perf_record->record_switch.id.time;
-                            }
                         break;
 
                         default:
@@ -613,20 +625,31 @@ static void* perfing_main(void* args) {
                     }
                 }
                 clock_gettime(CLOCK_MONOTONIC, &c);
-                ts_1 = ((signed long long) (c.tv_sec - b.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - b.tv_nsec));
+                ts_1 = ((signed long long) (c.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - a.tv_nsec));
+                fprintf(stdout, "record ts = %12lld ns\n", ts_1);
             } else {
                 if (perfed_is_stopped == 1u) {
-                    long ret;
+                    struct user_regs_struct regs = { 0 };
+                    long                    ret;
 
+                    errno = 0;
+                    ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &regs);
+                    if (ret == -1l) {
+                        fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno));
+                    } else {
+                        unwind(&regs);
+                    }
                     errno = 0;
                     ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
                     if (ret == -1l) {
                         fprintf(stderr, "PTRACE_DETACH failed %s\n", strerror(errno));
                     }
+
                     aux_bytes         = 0llu;
                     perfed_is_stopped = 0u;
                     clock_gettime(CLOCK_MONOTONIC, &c);
-                    ts_2 = ((signed long long) (c.tv_sec - d.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - d.tv_nsec));
+                    ts_2 = ((signed long long) (c.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - a.tv_nsec));
+                    fprintf(stdout, "detach ts = %12lld ns\n", ts_2);
                 }
             }
 
@@ -729,11 +752,11 @@ static void perfed_setup(void) {
                     fprintf(stdout, "perf_metadata->data_head   = %10llu\n", perf_metadata->data_head);
                     fprintf(stdout, "perf_metadata->data_tail   = %10llu\n", perf_metadata->data_tail);
                     fprintf(stdout, "perf_metadata->data_offset = %10llu\n", perf_metadata->data_offset);
-                    fprintf(stdout, "perf_metadata->data_size   = %10llu\n", perf_metadata->data_size);
+                    fprintf(stdout, "perf_metadata->data_size   = %10llu GB\n", perf_metadata->data_size / 1024llu / 1024llu);
                     fprintf(stdout, "perf_metadata->aux_head    = %10llu\n", perf_metadata->aux_head);
                     fprintf(stdout, "perf_metadata->aux_tail    = %10llu\n", perf_metadata->aux_tail);
                     fprintf(stdout, "perf_metadata->aux_offset  = %10llu\n", perf_metadata->aux_offset);
-                    fprintf(stdout, "perf_metadata->aux_size    = %10llu\n", perf_metadata->aux_size);
+                    fprintf(stdout, "perf_metadata->aux_size    = %10llu GB\n", perf_metadata->aux_size / 1024llu / 1024llu);
 #endif
 
                     perf_data_buffer = &((__u8*) (perf_metadata))[ perf_metadata->data_offset ];
