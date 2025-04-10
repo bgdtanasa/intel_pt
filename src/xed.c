@@ -21,7 +21,7 @@
 
 #define MAX_NO_DWARF_UNWINDS (50000llu)
 #define MAX_NO_INSTS         (2000000llu)
-#define TIP_QUEUE_LEN        (512u)
+#define TIP_QUEUE_LEN        (1u * 1024u)
 
 typedef struct {
   unsigned int tnt;
@@ -475,6 +475,14 @@ void xed_update_last_inst(const unsigned long long addr) {
   inst_t* inst = xed_unwind_find_inst(addr);
 
   if (inst != NULL) {
+    if ((last_inst != -1ll) && (addr == insts[ last_inst ].addr)) {
+      fprintf(stdout,
+              "%s %016llx %016llx UPDATE LOOP\n",
+              insts[ last_inst ].binary,
+              insts[ last_inst ].addr,
+              insts[ last_inst ].addr - insts[ last_inst ].base_addr); for (;;) {}
+    }
+
     last_inst = ((signed long long) (inst - &insts[ 0u ]));
   } else {
     last_inst = -1ll;

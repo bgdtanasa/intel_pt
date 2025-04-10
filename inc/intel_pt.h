@@ -8,5 +8,6 @@ extern unsigned int intel_pt_pgd;
 extern unsigned long long int intel_pt_decode(const unsigned char*   x,
                                               unsigned long long int n,
                                               const double           ts);
+extern void intel_pt_reset(void);
 
 #endif

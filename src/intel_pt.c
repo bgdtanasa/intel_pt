@@ -270,7 +270,7 @@ static unsigned long long int ip_decode(const unsigned char** const   x,
   (void) (s);
   (void) (ip_compressed);
 #endif
-  if ((ip != 0llu) || (p == TIP_PGD)) {
+  if (ip != 0llu) {
     if (p == TIP_PGE) {
       if (xed_enable == 1u) {
         xed_enable = 2u;
@@ -280,6 +280,8 @@ static unsigned long long int ip_decode(const unsigned char** const   x,
       if (xed_enable == 2u) {
         xed_process_branches(0u, 0u, ip);
       }
+    } else if (p == TIP_PGD) {
+      fprintf(stderr, "TIP_PGD %16llx\n", ip); for (;;) { }
     }
   } else {
     xed_enable = 0u;
@@ -451,6 +453,7 @@ decode_again:
     }
     if ((n >= 2llu) && (*x_16 == PSBEND)) {
       last_psb   = 0u;
+      //last_ip    = 0u;
       xed_enable = (xed_enable == 0u) ? (1u) : (xed_enable);
 
 #if defined(PRINT_PSBEND)
@@ -782,4 +785,9 @@ cyc_again:
     memcpy(((void*) (x_orig)), ((void*) (x)), ((size_t) (n)));
   }
   return n;
+}
+
+void intel_pt_reset(void) {
+  xed_enable = 0u;
+  xed_reset_last_inst();
 }
