@@ -66,12 +66,13 @@ static int x_init(void) {
           b = vmi_end;
 
           for (unsigned long x = a; x < b; x += 4096lu) {
-            struct page* perfed_page = my_follow_page(perfed_vma, x, FOLL_GET);
+            struct page* perfed_page = my_follow_page(perfed_vma, x, FOLL_WRITE | FOLL_GET | FOLL_LONGTERM);
 
             if (perfed_page != NULL) {
             } else {
-              vm_fault_t ret = handle_mm_fault(perfed_vma, x, FAULT_FLAG_WRITE, NULL);
+              vm_fault_t ret = handle_mm_fault(perfed_vma, x, FAULT_FLAG_WRITE | FAULT_FLAG_REMOTE | FAULT_FLAG_VMA_LOCK, NULL);
 
+              printk(KERN_INFO "handle_mm_fault :: %016lx %u", x, ret);
               if (ret & VM_FAULT_COMPLETED) {
                 
               } else if (ret & VM_FAULT_ERROR) {
@@ -94,6 +95,7 @@ static int x_init(void) {
                                                          &perfed_page,
                                                          NULL);
 
+        printk(KERN_INFO "%2d :: %016lx %ld", no_pgs, x, ret);
         if (ret == 1) {
           pgs[ no_pgs++ ] = perfed_page;
         }
@@ -127,7 +129,7 @@ static int x_init(void) {
                                    page_to_pfn(pgs[ i ]),
                                    4096lu,
                                    perfing_vma->vm_page_prot);
-#if 1
+#if 0
             vm_fault_t ret = handle_mm_fault(perfing_vma,
                                              perfing_vma->vm_start + i * 4096u,
                                              FAULT_FLAG_WRITE,
