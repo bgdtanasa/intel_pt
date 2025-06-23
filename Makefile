@@ -14,7 +14,7 @@ LIB_DIR=../xed/kits/$(XED_KIT)/lib
 
 CC=gcc
 CXX=gcc
-CFLAGS=$(INC_FLAGS) -flto -m64 -mavx -static -static-libgcc -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
+CFLAGS=$(INC_FLAGS) -Wno-unused-result -flto -m64 -mavx -static -static-libgcc -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
 
 -include $(DEPS)
 
