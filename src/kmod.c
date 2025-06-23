@@ -40,9 +40,9 @@ void kmod_load(const int perfed_pid) {
     if (ret == 0l) {
       fprintf(stdout, " finit_module(%s) success\n", module_name);
       fprintf(stdout, "perfing_vma_a = %016lx\n", perfing_vma_a);
-      fprintf(stdout, "perfing_vma_b = %016lx\n", perfing_vma_b);
+      fprintf(stdout, "perfing_vma_b = %016lx -> %llu KB\n", perfing_vma_b, (perfing_vma_b - perfing_vma_a) / 1024llu);
       fprintf(stdout, "perfed_vma_a  = %016lx\n", perfed_vma_a);
-      fprintf(stdout, "perfed_vma_b  = %016lx\n", perfed_vma_b);
+      fprintf(stdout, "perfed_vma_b  = %016lx -> %llu KB\n", perfed_vma_b, (perfed_vma_b - perfed_vma_a) / 1024llu);
     } else {
       fprintf(stderr,
               "finit_module(%s) failed :: %s\n",
