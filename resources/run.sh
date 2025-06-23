@@ -1,5 +1,13 @@
 #!/bin/bash
 
+function my_addr2line() {
+    X=$(awk '{ print $1 }' $1)
+    for x in $X;
+    do
+        addr2line -a 0x$x -f -C -p -e $2 >> addr2line.$1
+    done
+}
+
 function my_sed() {
     sed -i 's/RAX/R0/g' $1
     sed -i 's/RDX/R1/g' $1
@@ -23,15 +31,26 @@ function my_sed() {
     sed -i 's/undefined/X/g' $1
 }
 
-rm -rf $1
+#rm -rf $1
 rm -rf objdump.*
+rm -rf addr2line.*
 rm -rf dwarf.*
 
-gcc -ggdb -O3 -fno-omit-frame-pointer -march=tremont $1.c -o $1
+#gcc -ggdb -O0 -fno-omit-frame-pointer -march=tremont $1.c -o $1
 
-L=$(ldd -v $1 | grep \)\ = | awk '{ print $4 }' | uniq)
+#L=$(ldd -v $1 | grep \)\ = | awk '{ print $4 }' | uniq)
+L=$(ldd $1 | awk '{ if ($0 ~ /vdso/) {
+                    } else {
+                      for (i = 1; i <= NF; i++) {
+                        if ($i ~ /0x/) {
+                          system("readlink -f " $(i - 1))
+                        }
+                      }
+                    }
+                  }')
 
 objdump -d $1 | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.$1
+#my_addr2line objdump.$1 $1
 llvm-dwarfdump --debug-frame $1 | grep "  0x" | sort -k 1 -g  > dwarf.$1
 my_sed dwarf.$1
 for l in $L;
@@ -39,10 +58,12 @@ do
     a=$(basename $l)
 
     objdump -d $l | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.$a
+    #my_addr2line objdump.$a $l
     llvm-dwarfdump --debug-frame $l | grep "  0x" | sort -k 1 -g > dwarf.$a
     my_sed dwarf.$a
 done
 
 objdump -d \[vdso\] | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.\[vdso\]
+#my_addr2line objdump.\[vdso\] \[vdso\]
 llvm-dwarfdump --debug-frame \[vdso\] | grep "  0x" | sort -k 1 -g > dwarf.\[vdso\]
 my_sed dwarf.\[vdso\]

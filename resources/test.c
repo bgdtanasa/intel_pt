@@ -37,8 +37,8 @@ static inline __attribute__((always_inline)) unsigned long long read_tsc(void) {
     unsigned int lo;
     unsigned int hi;
 
-    fprintf(stdout, "x\n");
-    free(malloc(250));
+    free(malloc(56));
+    fprintf(stdout, "Y\n");
     asm volatile ("rdtsc" : "=a"(lo), "=d"(hi));
 
     return (((unsigned long long) (hi)) << 32llu) |
@@ -80,7 +80,7 @@ static void* th_main(void* args) {
             my_f = f_d;
         }
         my_f();
-        //fprintf(stdout, "X\n");
+
         {
             unsigned long long int ret     = 0llu;
             const char             buf[]   = "Bogdan\n";
@@ -92,6 +92,8 @@ static void* th_main(void* args) {
         {
             struct timespec ts;
 
+            free(malloc(56));
+            fprintf(stdout, "X\n");
             clock_gettime(CLOCK_MONOTONIC, &ts);
         }
     }
