@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "intel_pt.h"
+#include "pmu.h"
 #include "xed.h"
 
 #define PSB       (0x82028202u) // 1000_0010_0000_0010_1000_0010_0000_0010
@@ -272,12 +273,14 @@ static unsigned long long int ip_decode(const unsigned char** const   x,
 #endif
   if (ip != 0llu) {
     if (p == TIP_PGE) {
+      if (xed_enable == 0u) {
+        xed_enable = 1u;
+      }
       if (xed_enable == 1u) {
-        xed_enable = 2u;
         xed_update_last_inst(ip);
       }
     } else if (p == TIP) {
-      if (xed_enable == 2u) {
+      if (xed_enable == 1u) {
         xed_process_branches(0u, 0u, ip);
       }
     } else if (p == TIP_PGD) {
@@ -319,8 +322,9 @@ decode_again:
       intel_pt_pge = 0u;
       intel_pt_pgd = 0u;
 
-      last_psb = 1u;
-      last_ip  = 0u;
+      last_psb   = 1u;
+      xed_enable = 0u;
+      xed_reset_last_inst();
 
 #if defined(PRINT_PSB)
       fprintf(stdout, "      PSB\n");
@@ -343,7 +347,9 @@ decode_again:
       intel_pt_ovf += 1u;
       intel_pt_pge  = 0u;
       intel_pt_pgd  = 0u;
+
       xed_enable    = 0u;
+      xed_reset_last_inst();
 
       fprintf(stdout, "      OVF\n");
 
@@ -453,8 +459,7 @@ decode_again:
     }
     if ((n >= 2llu) && (*x_16 == PSBEND)) {
       last_psb   = 0u;
-      //last_ip    = 0u;
-      xed_enable = (xed_enable == 0u) ? (1u) : (xed_enable);
+      xed_enable = 1u;
 
 #if defined(PRINT_PSBEND)
       fprintf(stdout, "   PSBEND\n");
@@ -701,11 +706,14 @@ decode_again:
                                              (((unsigned long long int) (x[ 1u ])) <<  0llu);
 
 #if defined(PRINT_BIP)
-        fprintf(stdout, "      BIP :: ID = %8x :: PAYLOAD = %16llx\n", bip_id, payload);
+      fprintf(stdout, "      BIP :: ID = %8x :: PAYLOAD = %16llx\n", bip_id, payload);
+#else
+      (void) (bip_id);
 #endif
 
-        if ((bip_id == 0x01u) && (payload == 0x100000001)) {
-        }
+      if (bip_id == 0x01u) {
+        pmu_info(payload);
+      }
 
       x += 9llu;
       n -= 9llu;
@@ -763,7 +771,7 @@ cyc_again:
               p_one - 1u);
 #endif
 
-      if (xed_enable == 2u) {
+      if (xed_enable == 1u) {
         xed_process_branches((short_tnt >> 1u) & ((1u << (p_one - 1u)) - 1u),
                              p_one - 1u,
                              0llu);
