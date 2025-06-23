@@ -65,9 +65,9 @@
 #define N_MB(n)  ((n) * (ONE_MB))
 #define ONE_PAGE (N_KB(4llu))
 
-#define MMAP_DATA_NO_PAGES (8llu)
+#define MMAP_DATA_NO_PAGES (12llu)
 #define MMAP_SIZE          ((1llu + (1llu << (MMAP_DATA_NO_PAGES))) * (ONE_PAGE))
-#define MMAP_AUX_NO_PAGES  (10llu)
+#define MMAP_AUX_NO_PAGES  (18llu)
 #define MMAP_AUX_SIZE      ((1llu << (MMAP_AUX_NO_PAGES)) * (ONE_PAGE))
 
 #define DATA_BUFFER_SIZE (N_MB(2llu))
@@ -378,7 +378,7 @@ static void perfing_flush(void) {
     if ((perfed_is_stopped == 1u) || (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1)) {
         int status = 0;
 
-        if ((perfed_is_stopped == 1u) || (waitpid(perfed_pid, &status, 0) != -1)) {
+        if ((perfed_is_stopped == 1u) || (waitpid(perfed_pid, &status, 0) == perfed_pid)) {
             if ((perfed_is_stopped == 1u) || (WIFSTOPPED(status))) {
                 unsigned int no_retries = 0u;
 
@@ -434,8 +434,9 @@ static void* perfing_main(void* args) {
         unsigned int no_record_aux    = 0u;
         unsigned int no_record_switch = 0u;
 
-        double aux_util    = 0.0f;
-        double switch_util = 0.0f;
+        double aux_util     = 0.0f;
+        double aux_util_avg = 0.0f;
+        double switch_util  = 0.0f;
 
         const __u64  data_size      = perf_metadata->data_size;
         __u64        data_tail      = __atomic_load_n(&perf_metadata->data_tail, __ATOMIC_ACQUIRE);
@@ -464,19 +465,20 @@ static void* perfing_main(void* args) {
         {
             int status;
 
-            clock_gettime(CLOCK_MONOTONIC, &a);
             if (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1) {
-                if (waitpid(perfed_pid, &status, 0) != -1) {
+                const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
+
+                if (perfed_pid_wait == perfed_pid) {
                     if (WIFSTOPPED(status)) {
                         kmod_load(perfed_pid);
                         ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
+
+                        unwind_init(perfed_pid);
                     }
+                } else {
+                    fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
                 }
             }
-            clock_gettime(CLOCK_MONOTONIC, &b);
-            fprintf(stdout,
-                    "ptrace ts = %12lld ns\n",
-                    ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec)));
         }
 
         (void) posix_memalign(((void**) (&data_buffer)), AUX_ALIGNMENT, DATA_BUFFER_SIZE * sizeof(__u8)); memset(data_buffer, 0x00, DATA_BUFFER_SIZE * sizeof(__u8));
@@ -515,14 +517,16 @@ static void* perfing_main(void* args) {
                         } break;
 
                         case PERF_RECORD_AUX: {
-                            const __u64 aux_head      = __atomic_load_n(&perf_metadata->aux_head, __ATOMIC_ACQUIRE);
-                            const __u64 aux_tail      = __atomic_load_n(&perf_metadata->aux_tail, __ATOMIC_ACQUIRE);
-                            const __u64 rc_aux_offset = perf_record->record_aux.aux_offset;
-                            const __u64 rc_aux_size   = perf_record->record_aux.aux_size;
+                            const __u64  aux_head      = __atomic_load_n(&perf_metadata->aux_head, __ATOMIC_ACQUIRE);
+                            const __u64  aux_tail      = __atomic_load_n(&perf_metadata->aux_tail, __ATOMIC_ACQUIRE);
+                            const __u64  rc_aux_offset = perf_record->record_aux.aux_offset;
+                            const __u64  rc_aux_size   = perf_record->record_aux.aux_size;
+                            const double aux_ratio     = ((double) (aux_head - (rc_aux_offset + rc_aux_size))) / ((double) (rc_aux_offset + rc_aux_size));
 
                             // Periodic unwinding by stopping the perfed pid
-                            aux_util = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
-                            if ((aux_util >= 0.85f) && (perfed_is_stopped == 0u)) {
+                            aux_util      = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
+                            aux_util_avg += aux_util;
+                            if ((1)) {// && (aux_util_avg / ((double) (no_record_aux + 1u)) >= 0.01f) && (perfed_is_stopped == 0u)) {
                                 long ret;
                                 int  status;
 
@@ -531,27 +535,52 @@ static void* perfing_main(void* args) {
                                 if (ret == -1l) {
                                     fprintf(stderr, "PTRACE_ATTACH failed %s\n", strerror(errno));
                                 } else {
-                                    if (waitpid(perfed_pid, &status, 0) != -1) {
+                                    const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
+
+                                    if (perfed_pid_wait == perfed_pid) {
                                         if (WIFSTOPPED(status)) {
+                                            struct user_regs_struct regs = { 0 };
+
+                                            errno = 0;
+                                            ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &regs);
+                                            if (ret == -1l) {
+                                                fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno));
+                                            } else {
+                                                unwind(perfed_pid, perfed_cpu, &regs);
+                                            }
+                                            errno = 0;
+                                            ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
+                                            if (ret == -1l) {
+                                                fprintf(stderr, "PTRACE_DETACH failed %s\n", strerror(errno));
+                                            }
                                             perfed_is_stopped = 1u;
+                                            ioctl(perfing_fd, PERF_EVENT_IOC_DISABLE, 0);
 
                                             clock_gettime(CLOCK_MONOTONIC, &b);
                                             ts_0 = ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec));
                                             fprintf(stdout, "attach ts = %12lld ns\n", ts_0);
                                         }
+                                    } else {
+                                        fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
                                     }
                                 }
                             }
 
                             no_record_aux++;
                             fprintf(stdout,
-                                    "   RECORD_AUX :: %3u %3u \e[0;31m%12llu\e[0m %04llx :: \e[0;31m%12.5lf\e[0m %6u\n",
+                                    "   RECORD_AUX :: %3u %3u \e[0;31m%12llu\e[0m %04llx :: \e[0;31m%12.5lf %12.5lf %12.5lf\e[0m %6u\n",
                                     perf_record->record_aux.id.cpu,
                                     perf_record->record_aux.id.tid,
                                     rc_aux_size,
                                     perf_record->record_aux.flags,
                                     aux_util,
+                                    aux_util_avg / ((double) (no_record_aux)),
+                                    aux_ratio,
                                     no_record_aux);
+                            if (no_record_aux >= 50u) {
+                                aux_util_avg  = 0.0f;
+                                no_record_aux = 0u;
+                            }
 
                             if (perf_record->record_aux.flags == 0llu) {
                                 __u64       j   = 0llu;
@@ -628,6 +657,9 @@ static void* perfing_main(void* args) {
                                     switch_util,
                                     (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? ("ON  -> OFF") : ("OFF ->  ON"),
                                     no_record_switch);
+                            if (no_record_switch >= 50u) {
+                                no_record_switch = 0u;
+                            }
                         } break;
 
                         default: {
@@ -640,26 +672,12 @@ static void* perfing_main(void* args) {
                 fprintf(stdout, "record ts = %12lld ns\n", ts_1);
             } else {
                 if (perfed_is_stopped == 1u) {
-                    struct user_regs_struct regs = { 0 };
-                    long                    ret;
-
-                    errno = 0;
-                    ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &regs);
-                    if (ret == -1l) {
-                        fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno));
-                    } else {
-                        unwind(&regs);
-                    }
-                    errno = 0;
-                    ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
-                    if (ret == -1l) {
-                        fprintf(stderr, "PTRACE_DETACH failed %s\n", strerror(errno));
-                    }
-
                     perfed_is_stopped = 0u;
+                    ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
+
                     clock_gettime(CLOCK_MONOTONIC, &c);
-                    ts_2 = ((signed long long) (c.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - a.tv_nsec));
-                    fprintf(stdout, "detach ts = %12lld ns\n", ts_2);
+                    ts_2 = ((signed long long) (c.tv_sec - b.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - b.tv_nsec));
+                    fprintf(stdout, "detach ts = %12lld ms\n", ts_2 / 1000ll / 1000ll);
                 }
             }
 
@@ -669,7 +687,7 @@ static void* perfing_main(void* args) {
             } else if (perfing_is_running == 2u) {
                 fprintf(stdout, "Reseting Intel PT ...\n");
 
-                perfing_flush();// break;
+                perfing_flush();
 
                 fprintf(stdout, "Enabling Intel PT ...\n");
                 perfing_is_running = 1u;
@@ -679,6 +697,7 @@ static void* perfing_main(void* args) {
         fprintf(stderr, "pthread_setaffinity_np failed %s\n", strerror(ret));
     }
 
+    unwind_close();
     kmod_unload();
     free(data_buffer);
     free(aux_buffer);
