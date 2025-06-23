@@ -9,7 +9,12 @@
 
 #define MAX_NO_REGS (17u)
 
-//#define PRINT_XED
+#if 1
+#define PRINT_XED
+#if 1
+#define PRINT_XED_BRANCHES_ONLY
+#endif
+#endif
 
 #define COND_BRANCH          (1u << 0u)
 #define UNCOND_DIRECT_BRANCH (1u << 1u)

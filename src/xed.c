@@ -19,8 +19,8 @@
 #include "xed-decoded-inst.h"
 #include "xed-decoded-inst-api.h"
 
-#define MAX_NO_DWARF_UNWINDS (50000llu)
-#define MAX_NO_INSTS         (2000000llu)
+#define MAX_NO_DWARF_UNWINDS (5000000llu)
+#define MAX_NO_INSTS         (10000000llu)
 #define TIP_QUEUE_LEN        (1u * 1024u)
 
 typedef struct {
@@ -166,11 +166,14 @@ reg_again:
           continue;
         }
         c = a; a = b; b = c; b[ 0u ] = '\0';
-        if (a[ 0 ] == ',') {
+        if (a[ 0u ] == ',') {
           a += 2;
           goto reg_again;
         }
 
+        if (no_unwinds >= MAX_NO_DWARF_UNWINDS) {
+          fprintf(stderr, "Not enough space to load the unwinds\n"); for (;;) {}
+        }
         unwinds[ no_unwinds ].base_addr      = base_addr;
         unwinds[ no_unwinds ].addr           = base_addr + addr;
         unwinds[ no_unwinds ].cfa_reg        = cfa_reg;
@@ -296,6 +299,9 @@ xed_decode_inst:
             const unsigned int        xedd_dec_no_ops     = xed_decoded_inst_noperands(&xedd);
             const xed_uint_t          xedd_dec_no_mem_ops = xed_decoded_inst_number_of_memory_operands(&xedd);
 
+            if (no_insts >= MAX_NO_INSTS) {
+              fprintf(stderr, "Not enough space to load the instructions\n"); for (;;) {}
+            }
             memset(&insts[ no_insts ], 0, sizeof(inst_t));
             insts[ no_insts ].binary    = get_binary(xed_file);
             insts[ no_insts ].base_addr = base_addr;
@@ -413,16 +419,15 @@ xed_decode_inst:
 #endif
 
             no_insts++;
-            if (no_insts >= MAX_NO_INSTS) {
-              fprintf(stdout, "Not enough space to load the instructions\n");
-            }
           }
         } else if (xed_error == XED_ERROR_BUFFER_TOO_SHORT) {
           goto xed_decode_inst;
         //} else if (xed_error == XED_ERROR_INVALID_FOR_CHIP) {
-        //  // ?!?!
+        // ?!?!
+        //} else if (xed_error == XED_ERROR_INSTR_TOO_LONG) {
+        // ?!?!
         } else {
-          fprintf(stderr, "%016llx %3d :: %2u :: ", addr, xed_error, n_bytes);
+          fprintf(stderr, "%016llx %3d :: %2u :: ", addr - base_addr, xed_error, n_bytes);
           for (unsigned int i = 0u; i < n_bytes; i++) {
             fprintf(stderr, "%02x ", inst_bytes[ i ]);
           }
@@ -494,9 +499,11 @@ void xed_update_last_inst(const unsigned long long addr) {
 void xed_process_branches(const unsigned int           tnt,
                           const unsigned int           tnt_len,
                           const unsigned long long int tip) {
-#if defined(PRINT_XED)
   static unsigned long long int n = 0llu;
-#endif
+
+  if (last_inst == -1ll) {
+    return;
+  }
 
   tnt_t* x_tnt = NULL;
   tip_t* x_tip = NULL;
@@ -529,20 +536,23 @@ void xed_process_branches(const unsigned int           tnt,
 
   for (;;) {
 #if defined(PRINT_XED)
+#if defined(PRINT_XED_BRANCHES_ONLY)
+    if (insts[ last_inst ].cofi.type != 0u) {
+#endif
     fprintf(stdout,
-            "\n%10llu :: %16llx %16llx %16s :: %12s %12s :: %02x :: %4u %4u :: %4u %4u",
-            n++,
+            "\n%10llu :: %16llx %16llx %16.16s :: %12s %12s :: %02x",
+            n,
             insts[ last_inst ].addr - insts[ last_inst ].base_addr,
             insts[ last_inst ].addr,
             insts[ last_inst ].binary,
             xed_category_enum_t2str(insts[ last_inst ].category),
             xed_iclass_enum_t2str(insts[ last_inst ].iclass),
-            insts[ last_inst ].cofi.type,
-            tnt_queue_head,
-            tnt_queue_tail,
-            tip_queue_head,
-            tip_queue_tail);
+            insts[ last_inst ].cofi.type);
+#if defined(PRINT_XED_BRANCHES_ONLY)
+    }
 #endif
+#endif
+    n++;
 
     if (insts[ last_inst ].cofi.type == 0u) {
       last_inst++;
@@ -573,10 +583,13 @@ void xed_process_branches(const unsigned int           tnt,
           x_tnt->tnt_len--;
           if (br != 0u) {
 #if defined(PRINT_XED)
-            fprintf(stdout, " -> %16llx", insts[ last_inst ].cofi.u.j.addr);
+            fprintf(stdout, " -> %16llx 1", insts[ last_inst ].cofi.u.j.addr);
 #endif
             xed_update_last_inst(insts[ last_inst ].cofi.u.j.addr);
           } else {
+#if defined(PRINT_XED)
+            fprintf(stdout, " -> %16llx 0", insts[ last_inst + 1ll ].addr);
+#endif
             last_inst++;
           }
         } else {
@@ -643,6 +656,7 @@ inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
       b = m - 1ll;
     }
   }
+  //fprintf(stdout, "Instruction %016llx not found\n", addr); for (;;) {}
   return NULL;
 }
 
@@ -670,9 +684,21 @@ dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr) {
 }
 
 void xed_unwind_link_inst_and_dwarf(void) {
+  for (unsigned long long int i = 0llu; i < no_insts - 1llu; i++) {
+    if (insts[ i ].addr > insts[ i + 1llu ].addr) {
+      fprintf(stdout, "The instructions are not sorted!\n"); for (;;) {}
+    }
+  }
   for (unsigned long long int i = 0llu; i < no_insts; i++) {
     const unsigned long long int addr_offset = ((unsigned long long int) (insts[ i ].length)) - 1llu;
 
     insts[ i ].unwind = xed_unwind_find_dwarf(insts[ i ].addr + addr_offset);
+    if (insts[ i ].unwind == NULL) {
+      fprintf(stdout,
+              "Unwind for instruction %016llx not found %s\n",
+              insts[ i ].addr - insts[ i ].base_addr,
+              insts[ i ].binary);
+      //for (;;) {}
+    }
   }
 }
