@@ -11,7 +11,7 @@
 
 #if 1
 #define PRINT_XED
-#if 1
+#if 0
 #define PRINT_XED_BRANCHES_ONLY
 #endif
 #endif

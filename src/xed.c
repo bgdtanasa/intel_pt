@@ -50,6 +50,8 @@ static tip_t            tip_queue[ TIP_QUEUE_LEN ];
 static unsigned int     tip_queue_head;
 static unsigned int     tip_queue_tail;
 
+static FILE* branches_fp;
+
 #if 0
 static unsigned long long int read_perfed_vm(const int perfed_pid, const unsigned long long int addr) {
   unsigned long long int vm_entry = 0llu;
@@ -467,6 +469,11 @@ void perfed_xed(const int perfed_pid) {
 
   xed_tables_init();
   xed_get_chip_features(&chip_features, XED_CHIP_ALL); //XED_CHIP_SNOW_RIDGE);
+
+  branches_fp = fopen("branches.log", "w");
+  if (branches_fp == NULL) {
+    branches_fp = stdout;
+  }
 }
 
 void xed_reset_last_inst(void) {
@@ -499,6 +506,7 @@ void xed_update_last_inst(const unsigned long long addr) {
 void xed_process_branches(const unsigned int           tnt,
                           const unsigned int           tnt_len,
                           const unsigned long long int tip) {
+  static char                   branches_buffer[ 512u ];
   static unsigned long long int n = 0llu;
 
   if (last_inst == -1ll) {
@@ -539,8 +547,8 @@ void xed_process_branches(const unsigned int           tnt,
 #if defined(PRINT_XED_BRANCHES_ONLY)
     if (insts[ last_inst ].cofi.type != 0u) {
 #endif
-    fprintf(stdout,
-            "\n%10llu :: %16llx %16llx %16.16s :: %12s %12s :: %02x",
+    sprintf(&branches_buffer[ 0u ],
+            "%10llu :: %16llx %16llx %16.16s :: %12s %12s :: %02x",
             n,
             insts[ last_inst ].addr - insts[ last_inst ].base_addr,
             insts[ last_inst ].addr,
@@ -552,9 +560,11 @@ void xed_process_branches(const unsigned int           tnt,
     }
 #endif
 #endif
-    n++;
 
     if (insts[ last_inst ].cofi.type == 0u) {
+#if defined(PRINT_XED)
+      fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ last_inst + 1ll ].addr); n++;
+#endif
       last_inst++;
     } else {
       if (tnt_queue_tail != tnt_queue_head) {
@@ -583,30 +593,27 @@ void xed_process_branches(const unsigned int           tnt,
           x_tnt->tnt_len--;
           if (br != 0u) {
 #if defined(PRINT_XED)
-            fprintf(stdout, " -> %16llx 1", insts[ last_inst ].cofi.u.j.addr);
+            fprintf(branches_fp, "%s -> %16llx 1\n", &branches_buffer[ 0u ], insts[ last_inst ].cofi.u.j.addr); n++;
 #endif
             xed_update_last_inst(insts[ last_inst ].cofi.u.j.addr);
           } else {
 #if defined(PRINT_XED)
-            fprintf(stdout, " -> %16llx 0", insts[ last_inst + 1ll ].addr);
+            fprintf(branches_fp, "%s -> %16llx 0\n", &branches_buffer[ 0u ], insts[ last_inst + 1ll ].addr); n++;
 #endif
             last_inst++;
           }
         } else {
-#if defined(PRINT_XED)
-          fprintf(stdout, "\n");
-#endif
           return;
         }
       } else if ((insts[ last_inst ].cofi.type & UNCOND_DIRECT_BRANCH) != 0u) {
         if (insts[ last_inst ].category == XED_CATEGORY_CALL) {
 #if defined(PRINT_XED)
-          fprintf(stdout, " -> %16llx", insts[ last_inst ].cofi.u.c.addr);
+          fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ last_inst ].cofi.u.c.addr); n++;
 #endif
           xed_update_last_inst(insts[ last_inst ].cofi.u.c.addr);
         } else if (insts[ last_inst ].category == XED_CATEGORY_UNCOND_BR) {
 #if defined(PRINT_XED)
-          fprintf(stdout, " -> %16llx", insts[ last_inst ].cofi.u.j.addr);
+          fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ last_inst ].cofi.u.j.addr); n++;
 #endif
           xed_update_last_inst(insts[ last_inst ].cofi.u.j.addr);
         } else {
@@ -621,14 +628,11 @@ void xed_process_branches(const unsigned int           tnt,
             // What to do in this case?!
           }
 #if defined(PRINT_XED)
-          fprintf(stdout, " -> %16llx", x_tip->tip);
+          fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], x_tip->tip); n++;
 #endif
           xed_update_last_inst(x_tip->tip);
           tip_queue_tail = (tip_queue_tail + 1u) % TIP_QUEUE_LEN;
         } else {
-#if defined(PRINT_XED)
-          fprintf(stdout, "\n");
-#endif
           return;
         }
       } else if ((insts[ last_inst ].cofi.type & FAR_TRANSFER) != 0u) {
