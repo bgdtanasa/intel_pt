@@ -48,8 +48,9 @@
 #define CYC_MASK       (0x03u)
 #define SHORT_TNT_MASK (0x01u)
 
-#if 0
+#if 1
 #define PRINT_PSB
+#define PRINT_VMCS
 #define PRINT_TSC_MTC
 #define PRINT_BBP
 #define PRINT_PSBEND
@@ -359,7 +360,9 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 7llu) && (*x_16 == VMCS)) {
+#if defined(PRINT_VMCS)
       fprintf(stdout, "     VMCS\n");
+#endif
 
       x += 7llu;
       n -= 7llu;
