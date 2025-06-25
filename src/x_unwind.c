@@ -26,7 +26,7 @@ static inline __attribute__((always_inline)) unsigned long long read_tsc(void) {
 }
 
 void unwind_init(const int perfed_pid) {
-  unwind_fp = stdout; //fopen("unwind.log", "w");
+  unwind_fp = fopen("unwind.log", "w");
   if (unwind_fp == NULL) {
     unwind_fp = stdout;
   }
