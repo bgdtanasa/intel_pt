@@ -13,7 +13,7 @@
 #include <linux/perf_event.h>
 #include <linux/hw_breakpoint.h>
 
-#if 0
+#if 1
 #define PRINT_PMU
 #endif
 
@@ -183,8 +183,18 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
                        perfed_pid,
                        perfed_cpu,
                        intel_pt_fd);
-  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L1_HIT,
+  cnt_fd = install_pmu(GEN_PMU_BR_INST_RETIRED_ALL_BRANCHES,
                        1u,
+                       perfed_pid,
+                       perfed_cpu,
+                       intel_pt_fd);
+  cnt_fd = install_pmu(GEN_PMU_BR_MISP_RETIRED_ALL_BRANCHES,
+                       0u,
+                       perfed_pid,
+                       perfed_cpu,
+                       intel_pt_fd);
+  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L1_HIT,
+                       0u,
                        perfed_pid,
                        perfed_cpu,
                        intel_pt_fd);
@@ -203,6 +213,7 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
                        perfed_pid,
                        perfed_cpu,
                        intel_pt_fd);
+#if 0
   cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L3_HIT,
                        0u,
                        perfed_pid,
@@ -213,6 +224,7 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
                        perfed_pid,
                        perfed_cpu,
                        intel_pt_fd);
+#endif
   fprintf(stdout, "====== PMU ======\n");
 
   (void) (cnt_fd);
@@ -222,7 +234,7 @@ void pmu_info(const unsigned long long int pmu_mask) {
   for (unsigned long long int i = 0llu; i < 64llu; i++) {
     if (pmu_mask & (1llu << i)) {
 #if defined(PRINT_PMU)
-      fprintf(stdout, "\t%2llu %-64s\n", i, pmus[ i ].name);
+      fprintf(stdout, "BIP PMU[ %2llu ] = %20s\n", i, pmus[ i ].name);
 #endif
     }
   }

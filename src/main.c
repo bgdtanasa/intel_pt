@@ -38,11 +38,11 @@
 #define INTEL_PT_CONFIG_PT         ((__u64) (1llu <<  0llu))
 #define INTEL_PT_CONFIG_CYC        ((__u64) (1llu <<  1llu))
 #define INTEL_PT_CONFIG_PWR_EVT    ((__u64) (1llu <<  4llu))
-#define INTEL_PT_CONFIG_FUP_ON_PTW ((__u64) (0llu <<  5llu))
-#define INTEL_PT_CONFIG_MTC        ((__u64) (0llu <<  9llu))
+#define INTEL_PT_CONFIG_FUP_ON_PTW ((__u64) (1llu <<  5llu))
+#define INTEL_PT_CONFIG_MTC        ((__u64) (1llu <<  9llu))
 #define INTEL_PT_CONFIG_TSC        ((__u64) (1llu << 10llu))
 #define INTEL_PT_CONFIG_NORETCOMP  ((__u64) (1llu << 11llu))
-#define INTEL_PT_CONFIG_PTW        ((__u64) (0llu << 12llu))
+#define INTEL_PT_CONFIG_PTW        ((__u64) (1llu << 12llu))
 #define INTEL_PT_CONFIG_BRANCH     ((__u64) (1llu << 13llu))
 #define INTEL_PT_CONFIG_MTC_PERIOD ((__u64) (0llu << 14llu))
 #define INTEL_PT_CONFIG_CYC_THRESH ((__u64) (0llu << 19llu))
@@ -83,6 +83,7 @@
 #else
 #endif
 
+#define IA32_TSC_ADJUST               (0x003Bllu)
 #define IA32_PERFEVTSEL0              (0x0186llu)
 #define IA32_PERFEVTSEL1              (0x0187llu)
 #define IA32_PERFEVTSEL2              (0x0188llu)
@@ -151,9 +152,7 @@ typedef union {
 
 static pid_t perfed_pid;
 static int   perfed_cpu;
-#if 0
 static int   perfed_msr_fd;
-#endif
 static int   perfing_cpu;
 static int   perfing_fd;
 
@@ -169,8 +168,10 @@ static __u8*                        data_buffer;
 static __u8*                        aux_buffer;
 static perf_record_t*               perf_record;
 
+unsigned long long int tsc_adj;
 unsigned long long int tsc_hz;
 unsigned long long int tsc_ratio;
+unsigned long long int base_hz;
 unsigned long long int bus_hz;
 
 static __u64 switch_ref;
@@ -179,7 +180,6 @@ static __u64 switch_out;
 static __u64 last_switch_in;
 static __u64 last_switch_out;
 
-#if 0
 static void perfed_msr(void) {
     char fd_name[ 128u ];
 
@@ -188,8 +188,15 @@ static void perfed_msr(void) {
     if (perfed_msr_fd != -1) {
         unsigned long long int msr_val;
 
-        fprintf(stdout, "perfed_msr = %2d %s\n", perfed_msr_fd, &fd_name[ 0u ]);
+        fprintf(stdout, "====== MSR ======\n");
+        //fprintf(stdout, "perfed_msr = %2d %s\n", perfed_msr_fd, &fd_name[ 0u ]);
 
+        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_TSC_ADJUST) == sizeof(msr_val)) {
+            fprintf(stdout, "IA32_TSC_ADJUST = %016llx\n", msr_val);
+
+            tsc_adj = msr_val;
+        }
+#if 0
         if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PERFEVTSEL0) == sizeof(msr_val)) {
             fprintf(stdout, "IA32_PERFEVTSEL0 = %016llx\n", msr_val);
             fprintf(stdout, "\tEVENT_SELECT = %16llx\n", (msr_val >>  0llu) & 0xFFllu);
@@ -368,12 +375,14 @@ static void perfed_msr(void) {
         if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_PMC3) == sizeof(msr_val)) {
             fprintf(stdout, "MSR_RELOAD_PMC3 = %016llx :: %12llu\n", msr_val, 0x0000FFFFFFFFFFFFllu - msr_val);
         }
+#endif
+        fprintf(stdout, "====== MSR ======\n");
     } else {
         fprintf(stderr, "open failed %s\n", strerror(errno));
     }
 }
-#endif
 
+#if 0
 static void perfing_flush(void) {
     if ((perfed_is_stopped == 1u) || (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1)) {
         int status = 0;
@@ -418,6 +427,7 @@ static void perfing_flush(void) {
         }
     }
 }
+#endif
 
 static void* perfing_main(void* args) {
     (void) (args);
@@ -526,7 +536,7 @@ static void* perfing_main(void* args) {
                             // Periodic unwinding by stopping the perfed pid
                             aux_util      = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
                             aux_util_avg += aux_util;
-                            if ((1)) {// && (aux_util_avg / ((double) (no_record_aux + 1u)) >= 0.01f) && (perfed_is_stopped == 0u)) {
+                            if ((0)) {// && (aux_util_avg / ((double) (no_record_aux + 1u)) >= 0.01f) && (perfed_is_stopped == 0u)) {
                                 long ret;
                                 int  status;
 
@@ -687,10 +697,11 @@ static void* perfing_main(void* args) {
             } else if (perfing_is_running == 2u) {
                 fprintf(stdout, "Reseting Intel PT ...\n");
 
-                perfing_flush();
+                //perfing_flush();
 
                 fprintf(stdout, "Enabling Intel PT ...\n");
                 perfing_is_running = 1u;
+                break;
             }
         }
     } else {
@@ -784,7 +795,7 @@ static void perfed_setup(void) {
                     perfed_xed(perfed_pid);
                     perfed_proc(perfed_pid, NULL);
                     perfed_pmu(perfed_pid, perfed_cpu, perfing_fd);
-                    //perfed_msr();
+                    perfed_msr();
 
                     fprintf(stdout, "perf_metadata->data_head   = %10llu\n", perf_metadata->data_head);
                     fprintf(stdout, "perf_metadata->data_tail   = %10llu\n", perf_metadata->data_tail);
@@ -941,10 +952,12 @@ int main(int argc, char *argv[ ]) {
                     eax & 0xFFFFu,
                     ebx & 0xFFFFu,
                     ecx & 0xFFFFu);
-            bus_hz = ((unsigned long long int) (ecx & 0xFFFFu)) * 1000000llu;
+            base_hz = ((unsigned long long int) (eax & 0xFFFFu)) * 1000000llu;
+            bus_hz  = ((unsigned long long int) (ecx & 0xFFFFu)) * 1000000llu;
 
-            fprintf(stdout, "TSC = %12llu %12llu\n", tsc_hz, tsc_ratio);
-            fprintf(stdout, "BUS = %12llu\n", bus_hz);
+            fprintf(stdout, "TSC  = %12llu %12llu\n", tsc_hz, tsc_ratio);
+            fprintf(stdout, "BASE = %12llu\n", base_hz);
+            fprintf(stdout, "BUS  = %12llu\n", bus_hz);
         }
 
         perfed_setup();
