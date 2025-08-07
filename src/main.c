@@ -32,6 +32,10 @@
 #include "kmod.h"
 #include "x_unwind.h"
 
+#if 0
+#define PRINT_RECORD
+#endif
+
 //  /sys/bus/event_source/devices/intel_pt/type
 #define INTEL_PT_TYPE              ((__u32) (12u))
 // /sys/bus/event_source/devices/intel_pt/format/*
@@ -47,6 +51,7 @@
 #define INTEL_PT_CONFIG_MTC_PERIOD ((__u64) (0llu << 14llu))
 #define INTEL_PT_CONFIG_CYC_THRESH ((__u64) (0llu << 19llu))
 #define INTEL_PT_CONFIG_PSB_PERIOD ((__u64) (0llu << 24llu))
+#define INTEL_PT_CONFIG_NOTNT      ((__u64) (0llu << 55llu))
 #define INTEL_PT_CONFIG            ((INTEL_PT_CONFIG_PT)         | \
                                     (INTEL_PT_CONFIG_CYC)        | \
                                     (INTEL_PT_CONFIG_FUP_ON_PTW) | \
@@ -57,7 +62,8 @@
                                     (INTEL_PT_CONFIG_BRANCH)     | \
                                     (INTEL_PT_CONFIG_MTC_PERIOD) | \
                                     (INTEL_PT_CONFIG_CYC_THRESH) | \
-                                    (INTEL_PT_CONFIG_PSB_PERIOD))
+                                    (INTEL_PT_CONFIG_PSB_PERIOD) | \
+                                    (INTEL_PT_CONFIG_NOTNT))
 
 #define ONE_KB   (1024llu)
 #define ONE_MB   ((ONE_KB) * (ONE_KB))
@@ -138,6 +144,11 @@ typedef struct {
 } perf_record_itrace_start_t;
 
 typedef struct {
+    __u64       lost;
+    sample_id_t sample_id;
+} perf_record_lost_samples_t;
+
+typedef struct {
     sample_id_t id;
 } perf_record_switch_t;
 
@@ -145,6 +156,7 @@ typedef union {
     perf_record_lost_t         record_lost;
     perf_record_aux_t          record_aux;
     perf_record_itrace_start_t record_itrace_start;
+    perf_record_lost_samples_t record_lost_samples;
     perf_record_switch_t       record_switch;
 
     unsigned char              one_page[ ONE_PAGE ];
@@ -170,6 +182,7 @@ static perf_record_t*               perf_record;
 
 unsigned long long int tsc_adj;
 unsigned long long int tsc_hz;
+double                 tsc_hz_ns;
 unsigned long long int tsc_ratio;
 unsigned long long int base_hz;
 unsigned long long int bus_hz;
@@ -454,7 +467,6 @@ static void* perfing_main(void* args) {
         const __u64  aux_size       = perf_metadata->aux_size;
         const __u64  perf_header_sz = ((__u64) (sizeof(struct perf_event_header)));
         __u64        perf_record_sz = 0llu;
-        const double tsc_factor     = ((double) (tsc_hz)) / 1e9;
 
         struct timespec a;
         struct timespec b;
@@ -520,13 +532,15 @@ static void* perfing_main(void* args) {
                         case PERF_RECORD_LOST: {
                             no_record_lost++;
                             fprintf(stdout,
-                                    "  RECORD_LOST :: %12llu %12llu :: %6u\n",
+                                    "        RECORD_LOST :: %20llu %12llu %12llu :: %6u\n",
+                                    perf_record->record_lost.sample_id.time,
                                     perf_record->record_lost.id,
                                     perf_record->record_lost.lost,
                                     no_record_lost);
                         } break;
 
                         case PERF_RECORD_AUX: {
+                            static __u64 rc_aux_ovf    = 0llu;
                             const __u64  aux_head      = __atomic_load_n(&perf_metadata->aux_head, __ATOMIC_ACQUIRE);
                             const __u64  aux_tail      = __atomic_load_n(&perf_metadata->aux_tail, __ATOMIC_ACQUIRE);
                             const __u64  rc_aux_offset = perf_record->record_aux.aux_offset;
@@ -535,6 +549,9 @@ static void* perfing_main(void* args) {
 
                             // Periodic unwinding by stopping the perfed pid
                             aux_util      = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
+                            if (aux_util > 1.0f) {
+                                fprintf(stdout, "%12llu %12llu\n", aux_head - aux_tail, aux_size);
+                            }
                             aux_util_avg += aux_util;
                             if ((0)) {// && (aux_util_avg / ((double) (no_record_aux + 1u)) >= 0.01f) && (perfed_is_stopped == 0u)) {
                                 long ret;
@@ -577,8 +594,10 @@ static void* perfing_main(void* args) {
                             }
 
                             no_record_aux++;
+#if defined(PRINT_RECORD)
                             fprintf(stdout,
-                                    "   RECORD_AUX :: %3u %3u \e[0;31m%12llu\e[0m %04llx :: \e[0;31m%12.5lf %12.5lf %12.5lf\e[0m %6u\n",
+                                    "         RECORD_AUX :: %20llu %12u %12u \e[0;31m%12llu\e[0m %04llx :: \e[0;31m%12.5lf %12.5lf %12.5lf\e[0m %6u\n",
+                                    perf_record->record_aux.id.time,
                                     perf_record->record_aux.id.cpu,
                                     perf_record->record_aux.id.tid,
                                     rc_aux_size,
@@ -587,57 +606,83 @@ static void* perfing_main(void* args) {
                                     aux_util_avg / ((double) (no_record_aux)),
                                     aux_ratio,
                                     no_record_aux);
+#endif
                             if (no_record_aux >= 50u) {
                                 aux_util_avg  = 0.0f;
                                 no_record_aux = 0u;
                             }
 
                             if (perf_record->record_aux.flags == 0llu) {
-                                __u64       j   = 0llu;
-                                const __u64 j_a = AUX_ALIGNMENT * (rc_aux_size / AUX_ALIGNMENT);
-                                const __u64 j_b = rc_aux_size % AUX_ALIGNMENT;
+                                if ((rc_aux_offset - rc_aux_ovf + rc_aux_size) >= (aux_size - 0llu)) {
+                                    __u64       j   = 0llu;
+                                    const __u64 j_a = AUX_ALIGNMENT * (rc_aux_size / AUX_ALIGNMENT);
+                                    const __u64 j_b = rc_aux_size % AUX_ALIGNMENT;
 
-                                // Perform non-temporal copy
-                                for (j = 0llu; j < j_a; j += AUX_ALIGNMENT) {
-                                    const __u64 j_c = (j + rc_aux_offset) % aux_size;
+                                    // Check buffer size
+                                    if (rc_aux_size > AUX_BUFFER_SIZE) {
+                                        fprintf(stderr, "AUX buffer too small %10llu vs %10llu!\n", AUX_BUFFER_SIZE, rc_aux_size); for (;;) {}
+                                    }
+                                    // Perform non-temporal copy
+                                    for (j = 0llu; j < j_a; j += AUX_ALIGNMENT) {
+                                        const __u64 j_c = (j + rc_aux_offset) % aux_size;
 
-                                    if (j_c + AUX_ALIGNMENT <= aux_size) {
+                                        if (j_c + AUX_ALIGNMENT < aux_size) {
 #if (AUX_MEMCPY == AUX_MEMCPY_SSE)
-                                        __m128i* dst = ((__m128i*) (&aux_buffer[ j ]));
-                                        __m128i* src = ((__m128i*) (&perf_aux_buffer[ j_c ]));
+                                            __m128i* dst = ((__m128i*) (&aux_buffer[ j ]));
+                                            __m128i* src = ((__m128i*) (&perf_aux_buffer[ j_c ]));
 
-                                        _mm_stream_si128(dst, _mm_loadu_si128(src));
+                                            _mm_stream_si128(dst, _mm_loadu_si128(src));
 #elif (AUX_MEMCPY == AUX_MEMCPY_AVX)
-                                        __m256i* dst = ((__m256i*) (&aux_buffer[ j ]));
-                                        __m256i* src = ((__m256i*) (&perf_aux_buffer[ j_c ]));
+                                            __m256i* dst = ((__m256i*) (&aux_buffer[ j ]));
+                                            __m256i* src = ((__m256i*) (&perf_aux_buffer[ j_c ]));
 
-                                        _mm256_stream_si256(dst, _mm256_loadu_si256(src));
+                                            _mm256_stream_si256(dst, _mm256_loadu_si256(src));
 #else
 #endif
-                                    } else {
-                                        for (__u64 k = 0llu; k < AUX_ALIGNMENT; k++) {
-                                            aux_buffer[ j + k ] = perf_aux_buffer[ (j + k + rc_aux_offset) % aux_size ];
+                                        } else {
+                                            for (__u64 k = 0llu; k < AUX_ALIGNMENT; k++) {
+                                                aux_buffer[ j + k ] = perf_aux_buffer[ (j + k + rc_aux_offset) % aux_size ];
+                                            }
                                         }
                                     }
-                                }
-                                for (__u64 k = 0llu; k < j_b; k++) {
-                                    aux_buffer[ j + k ] = perf_aux_buffer[ (j + k + rc_aux_offset) % aux_size ];
-                                }
-                                // Commit all non-temporal stores
-                                _mm_sfence();
+                                    for (__u64 k = 0llu; k < j_b; k++) {
+                                        aux_buffer[ j + k ] = perf_aux_buffer[ (j + k + rc_aux_offset) % aux_size ];
+                                    }
+                                    // Commit all non-temporal stores
+                                    _mm_sfence();
 
-                                (void) intel_pt_decode(((unsigned char*) (&aux_buffer[ 0 ])),
-                                                       ((unsigned long long int) (rc_aux_size)),
-                                                       ((double) (perf_record->record_aux.id.time)) * tsc_factor);
+                                    (void) intel_pt_decode(((unsigned char*) (&aux_buffer[ 0u ])),
+                                                           ((unsigned long long int) (rc_aux_size)));
+                                    rc_aux_ovf = rc_aux_offset + rc_aux_size;
+                                } else {
+                                    (void) intel_pt_decode(((unsigned char*) (&perf_aux_buffer[ rc_aux_offset % aux_size ])),
+                                                           ((unsigned long long int) (rc_aux_size)));
+                                }
 
                                 __atomic_store_n(&perf_metadata->aux_tail, rc_aux_offset + rc_aux_size, __ATOMIC_RELEASE);
-                            } else {
+                            }
+                            if (perf_record->record_aux.flags != 0llu) {
                                 perfing_is_running = 2u;
                             }
                         } break;
 
                         case PERF_RECORD_ITRACE_START: {
-                            fprintf(stdout, " ITRACE_START :: %12u %12u\n", perf_record->record_itrace_start.pid, perf_record->record_itrace_start.tid);
+#if defined(PRINT_RECORD)
+                            fprintf(stdout,
+                                    "       ITRACE_START :: %20s %12u %12u\n",
+                                    "",
+                                    perf_record->record_itrace_start.pid,
+                                    perf_record->record_itrace_start.tid);
+#endif
+                        } break;
+
+                        case PERF_RECORD_LOST_SAMPLES: {
+#if defined(PRINT_RECORD)
+                            fprintf(stdout,
+                                    "RECORD_LOST_SAMPLES :: %20llu %12.3lf ns\n",
+                                    perf_record->record_lost_samples.sample_id.time,
+                                    ((double) (perf_record->record_lost_samples.lost)) * tsc_hz_ns);
+#endif
                         } break;
 
                         case PERF_RECORD_SWITCH: {
@@ -647,7 +692,7 @@ static void* perfing_main(void* args) {
                                 last_switch_out = switch_ref;
                                 switch_out      = 0llu;
                                 last_switch_in  = switch_ref;
-                                switch_util = 0.0f;
+                                switch_util     = 0.0f;
                             } else {
                                 if (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) {
                                     switch_in       += switch_ref - last_switch_in;
@@ -660,26 +705,29 @@ static void* perfing_main(void* args) {
                             }
 
                             no_record_switch++;
+#if defined(PRINT_RECORD)
                             fprintf(stdout,
-                                    "RECORD_SWITCH :: %3u %3u \e[0;31m%12.5lf\e[0m %14s :: %6u\n",
+                                    "      RECORD_SWITCH :: %20llu %12u %12u \e[0;31m%12.5lf\e[0m %14s :: %6u\n",
+                                    perf_record->record_switch.id.time,
                                     perf_record->record_switch.id.cpu,
                                     perf_record->record_switch.id.tid,
                                     switch_util,
                                     (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? ("ON  -> OFF") : ("OFF ->  ON"),
                                     no_record_switch);
+#endif
                             if (no_record_switch >= 50u) {
                                 no_record_switch = 0u;
                             }
                         } break;
 
                         default: {
-                            fprintf(stdout, "RECORD_xxxxxx :: %2u\n", perf_header.type);
+                            fprintf(stdout, "      RECORD_xxxxxx :: %2u\n", perf_header.type);
                         } break;
                     }
                 }
                 clock_gettime(CLOCK_MONOTONIC, &c);
                 ts_1 = ((signed long long) (c.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - a.tv_nsec));
-                fprintf(stdout, "record ts = %12lld ns\n", ts_1);
+                //fprintf(stdout, "record ts = %12lld ns\n", ts_1);
             } else {
                 if (perfed_is_stopped == 1u) {
                     perfed_is_stopped = 0u;
@@ -709,6 +757,7 @@ static void* perfing_main(void* args) {
     }
 
     unwind_close();
+    xed_close();
     kmod_unload();
     free(data_buffer);
     free(aux_buffer);
@@ -742,8 +791,8 @@ static void perfed_setup(void) {
         perf_attrs.type           = INTEL_PT_TYPE;
         perf_attrs.size           = sizeof(struct perf_event_attr);
         perf_attrs.config         = INTEL_PT_CONFIG;
-        //perf_attrs.sample_period  = 50000;
-        perf_attrs.sample_freq    = 25000;
+        //perf_attrs.sample_period  = 10llu;
+        perf_attrs.sample_freq    = 2500llu;
         perf_attrs.sample_type    = PERF_SAMPLE_IP   |
                                     PERF_SAMPLE_TID  |
                                     PERF_SAMPLE_TIME |
@@ -765,6 +814,8 @@ static void perfed_setup(void) {
         perf_attrs.context_switch = 1;
         //perf_attrs.aux_output     = 1;
         //perf_attrs.clockid        = CLOCK_MONOTONIC_RAW;
+        perf_attrs.aux_watermark    = 3llu * AUX_BUFFER_SIZE / 4llu;
+        //perf_attrs.aux_sample_size  = N_KB(10);
 
         perfing_fd = syscall(SYS_perf_event_open,
                              &perf_attrs,
@@ -811,10 +862,10 @@ static void perfed_setup(void) {
                     perf_aux_buffer  = ((__u8*) (p));
                     perfing_setup();
                 } else {
-                    fprintf(stderr, "mmap failed %s\n", strerror(errno));
+                    fprintf(stderr, "mmap AUX failed %s\n", strerror(errno));
                 }
             } else {
-                fprintf(stderr, "mmap failed %s\n", strerror(errno));
+                fprintf(stderr, "mmap DATA failed %s\n", strerror(errno));
             }
         } else {
             fprintf(stderr, "perf_event_open failed %s\n", strerror(errno));
@@ -852,9 +903,9 @@ int main(int argc, char *argv[ ]) {
     sigaction(SIGINT, &sig_action, NULL);
 
     if (argc >= 4) {
-        perfed_pid  = atoi(argv[ 1 ]);
-        perfed_cpu  = atoi(argv[ 2 ]);
-        perfing_cpu = atoi(argv[ 3 ]);
+        perfed_pid  = atoi(argv[ 1u ]);
+        perfed_cpu  = atoi(argv[ 2u ]);
+        perfing_cpu = atoi(argv[ 3u ]);
 
         {
             unsigned int eax;
@@ -924,6 +975,7 @@ int main(int argc, char *argv[ ]) {
             fprintf(stdout, "\tIP Filtering Support  = %02x\n", (ebx >> 2u) & 0x01u);
             fprintf(stdout, "\tMTC Support           = %02x\n", (ebx >> 3u) & 0x01u);
             fprintf(stdout, "\tPTWRITE Support       = %02x\n", (ebx >> 4u) & 0x01u);
+            fprintf(stdout, "\tTNT Disable Support   = %02x\n", (ebx >> 8u) & 0x01u);
             // Leaf 14H :: ECX = 1
             eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
             __get_cpuid_count(0x14u, 0x01, &eax, &ebx, &ecx, &edx);
@@ -943,6 +995,7 @@ int main(int argc, char *argv[ ]) {
                     ((double) (ecx * (ebx / eax))) / 1e9);
             tsc_ratio = ((unsigned long long int) (ebx / eax));
             tsc_hz    = ((unsigned long long int) (ecx)) * tsc_ratio;
+            tsc_hz_ns = 1e9 / ((double) (tsc_hz));
             // Leaf 16H
             eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
             __get_cpuid(0x16u, &eax, &ebx, &ecx, &edx);
@@ -955,7 +1008,7 @@ int main(int argc, char *argv[ ]) {
             base_hz = ((unsigned long long int) (eax & 0xFFFFu)) * 1000000llu;
             bus_hz  = ((unsigned long long int) (ecx & 0xFFFFu)) * 1000000llu;
 
-            fprintf(stdout, "TSC  = %12llu %12llu\n", tsc_hz, tsc_ratio);
+            fprintf(stdout, "TSC  = %12llu %12llu %12.5lf\n", tsc_hz, tsc_ratio, tsc_hz_ns);
             fprintf(stdout, "BASE = %12llu\n", base_hz);
             fprintf(stdout, "BUS  = %12llu\n", bus_hz);
         }

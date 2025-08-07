@@ -13,9 +13,12 @@
 #include <linux/perf_event.h>
 #include <linux/hw_breakpoint.h>
 
-#if 1
+#if 0
 #define PRINT_PMU
 #endif
+
+#define PMU_PDIST_PERIOD     (128llu)
+#define PMU_PDIST_NO_PERIODS (32llu)
 
 #define FIXED_PMU_INST_RETIRED_ANY       ((__u64) (0x00C0llu))
 
@@ -33,8 +36,9 @@
 #define GEN_PMU_MEM_LOAD_UOPS_RETIRED_DRAM_HIT ((__u64) (0x80D1llu))
 
 typedef struct {
-  __u64       config;
-  const char* name;
+  __u64        config;
+  unsigned int precise_ip;
+  const char*  name;
 } pmu_t;
 
 static pmu_t pmus[ 64u ];
@@ -83,20 +87,22 @@ static const char* get_pmu_name(const __u64 config) {
   }
 }
 
-static void update_pmu(const __u64 config) {
+static void update_pmu(const __u64 config, const unsigned int precise_ip) {
   static unsigned int no_fix = 0u;
   static unsigned int no_gen = 0u;
 
   if (config == FIXED_PMU_INST_RETIRED_ANY) {
     pmus[ 32u + no_fix ] = (pmu_t) {
-      .config = config,
-      .name   = get_pmu_name(config)
+      .config     = config,
+      .precise_ip = precise_ip,
+      .name       = get_pmu_name(config)
     };
     no_fix++;
   } else {
     pmus[  0u + no_gen ] = (pmu_t) {
-      .config = config,
-      .name   = get_pmu_name(config)
+      .config     = config,
+      .precise_ip = precise_ip,
+      .name       = get_pmu_name(config)
     };
     no_gen++;
   }
@@ -128,10 +134,10 @@ static int install_pmu(const __u64        config,
 
   memset(&perf_attrs, 0, sizeof(perf_attrs));
   // 10 == /sys/devices/cpu_atom/type
-  perf_attrs.type           = 10; //PERF_TYPE_RAW;
+  perf_attrs.type           = 10u; //PERF_TYPE_RAW;
   perf_attrs.size           = sizeof(struct perf_event_attr);
   perf_attrs.config         = config;
-  perf_attrs.sample_period  = (precise_ip == 1u) ? (128) : (2);
+  perf_attrs.sample_period  = (precise_ip == 1u) ? (PMU_PDIST_NO_PERIODS * PMU_PDIST_PERIOD) : (2llu);
   perf_attrs.sample_type    = PERF_SAMPLE_IP   |
                               PERF_SAMPLE_TID  |
                               PERF_SAMPLE_TIME |
@@ -157,7 +163,7 @@ static int install_pmu(const __u64        config,
       ioctl(pmu_fd, PERF_EVENT_IOC_RESET, 0);
       ioctl(pmu_fd, PERF_EVENT_IOC_ENABLE, 0);
 
-      update_pmu(config);
+      update_pmu(config, precise_ip);
       fprintf(stdout,
               "\t[%8d %3d] :: %04llX %08x :: %u -> %s\n",
               perfed_pid,
@@ -175,6 +181,7 @@ static int install_pmu(const __u64        config,
 }
 
 void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt_fd) {
+  //return;
   int cnt_fd;
 
   fprintf(stdout, "====== PMU ======\n");
@@ -188,6 +195,7 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
                        perfed_pid,
                        perfed_cpu,
                        intel_pt_fd);
+#if 0
   cnt_fd = install_pmu(GEN_PMU_BR_MISP_RETIRED_ALL_BRANCHES,
                        0u,
                        perfed_pid,
@@ -213,7 +221,6 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
                        perfed_pid,
                        perfed_cpu,
                        intel_pt_fd);
-#if 0
   cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L3_HIT,
                        0u,
                        perfed_pid,
@@ -230,12 +237,18 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
   (void) (cnt_fd);
 }
 
-void pmu_info(const unsigned long long int pmu_mask) {
+unsigned int pmu_info(const unsigned long long int pmu_mask) {
+  unsigned int n = 0u;
+
   for (unsigned long long int i = 0llu; i < 64llu; i++) {
     if (pmu_mask & (1llu << i)) {
+      n += pmus[ i ].precise_ip;
+
 #if defined(PRINT_PMU)
-      fprintf(stdout, "BIP PMU[ %2llu ] = %20s\n", i, pmus[ i ].name);
+      fprintf(stdout, "BIP PMU[ %2llu ] = %20u %64.64s\n", i, pmus[ i ].precise_ip, pmus[ i ].name);
 #endif
     }
   }
+
+  return n;
 }
