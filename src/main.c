@@ -73,7 +73,7 @@
 
 #define MMAP_DATA_NO_PAGES (12llu)
 #define MMAP_SIZE          ((1llu + (1llu << (MMAP_DATA_NO_PAGES))) * (ONE_PAGE))
-#define MMAP_AUX_NO_PAGES  (18llu)
+#define MMAP_AUX_NO_PAGES  (17llu)
 #define MMAP_AUX_SIZE      ((1llu << (MMAP_AUX_NO_PAGES)) * (ONE_PAGE))
 
 #define DATA_BUFFER_SIZE (N_MB(2llu))
@@ -550,7 +550,10 @@ static void* perfing_main(void* args) {
                             // Periodic unwinding by stopping the perfed pid
                             aux_util      = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
                             if (aux_util > 1.0f) {
-                                fprintf(stdout, "%12llu %12llu\n", aux_head - aux_tail, aux_size);
+                                fprintf(stdout, "UTIL %12llu %12llu\n", aux_head - aux_tail, aux_size);
+                            }
+                            if (rc_aux_offset != aux_tail) {
+                                fprintf(stdout, "TAIL %12llu %12llu\n", rc_aux_offset, aux_tail);
                             }
                             aux_util_avg += aux_util;
                             if ((0)) {// && (aux_util_avg / ((double) (no_record_aux + 1u)) >= 0.01f) && (perfed_is_stopped == 0u)) {
@@ -662,6 +665,7 @@ static void* perfing_main(void* args) {
                                 __atomic_store_n(&perf_metadata->aux_tail, rc_aux_offset + rc_aux_size, __ATOMIC_RELEASE);
                             }
                             if (perf_record->record_aux.flags != 0llu) {
+                                fprintf(stdout, "AUX FLAGS = %04llx\n", perf_record->record_aux.flags);
                                 perfing_is_running = 2u;
                             }
                         } break;
@@ -727,7 +731,9 @@ static void* perfing_main(void* args) {
                 }
                 clock_gettime(CLOCK_MONOTONIC, &c);
                 ts_1 = ((signed long long) (c.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - a.tv_nsec));
-                //fprintf(stdout, "record ts = %12lld ns\n", ts_1);
+#if defined(PRINT_RECORD)
+                fprintf(stdout, "record ts = %12lld ns\n", ts_1);
+#endif
             } else {
                 if (perfed_is_stopped == 1u) {
                     perfed_is_stopped = 0u;
