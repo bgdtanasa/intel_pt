@@ -73,7 +73,7 @@
 
 #define MMAP_DATA_NO_PAGES (12llu)
 #define MMAP_SIZE          ((1llu + (1llu << (MMAP_DATA_NO_PAGES))) * (ONE_PAGE))
-#define MMAP_AUX_NO_PAGES  (17llu)
+#define MMAP_AUX_NO_PAGES  (15llu)
 #define MMAP_AUX_SIZE      ((1llu << (MMAP_AUX_NO_PAGES)) * (ONE_PAGE))
 
 #define DATA_BUFFER_SIZE (N_MB(2llu))
@@ -158,9 +158,7 @@ typedef union {
     perf_record_itrace_start_t record_itrace_start;
     perf_record_lost_samples_t record_lost_samples;
     perf_record_switch_t       record_switch;
-
-    unsigned char              one_page[ ONE_PAGE ];
-} perf_record_t __attribute__((aligned(4096)));
+} perf_record_t;
 
 static pid_t perfed_pid;
 static int   perfed_cpu;
@@ -457,9 +455,8 @@ static void* perfing_main(void* args) {
         unsigned int no_record_aux    = 0u;
         unsigned int no_record_switch = 0u;
 
-        double aux_util     = 0.0f;
-        double aux_util_avg = 0.0f;
-        double switch_util  = 0.0f;
+        double aux_util    = 0.0f;
+        double switch_util = 0.0f;
 
         const __u64  data_size      = perf_metadata->data_size;
         __u64        data_tail      = __atomic_load_n(&perf_metadata->data_tail, __ATOMIC_ACQUIRE);
@@ -545,18 +542,24 @@ static void* perfing_main(void* args) {
                             const __u64  aux_tail      = __atomic_load_n(&perf_metadata->aux_tail, __ATOMIC_ACQUIRE);
                             const __u64  rc_aux_offset = perf_record->record_aux.aux_offset;
                             const __u64  rc_aux_size   = perf_record->record_aux.aux_size;
-                            const double aux_ratio     = ((double) (aux_head - (rc_aux_offset + rc_aux_size))) / ((double) (rc_aux_offset + rc_aux_size));
 
-                            // Periodic unwinding by stopping the perfed pid
-                            aux_util      = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
+                            // Some sanity checks
                             if (aux_util > 1.0f) {
-                                fprintf(stdout, "UTIL %12llu %12llu\n", aux_head - aux_tail, aux_size);
+                                fprintf(stderr,
+                                        "PERF_RECORD_AUX util error :: %12llu %12llu\n",
+                                        aux_head - aux_tail,
+                                        aux_size); for (;;) {}
                             }
                             if (rc_aux_offset != aux_tail) {
-                                fprintf(stdout, "TAIL %12llu %12llu\n", rc_aux_offset, aux_tail);
+                                fprintf(stderr,
+                                        "PERF_RECORD_AUX tail error :: %12llu %12llu\n",
+                                        rc_aux_offset, aux_tail); for (;;) {}
                             }
-                            aux_util_avg += aux_util;
-                            if ((0)) {// && (aux_util_avg / ((double) (no_record_aux + 1u)) >= 0.01f) && (perfed_is_stopped == 0u)) {
+
+                            // Periodic unwinding by stopping the perfed pid
+                            aux_util = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
+#if 0
+                            if ((aux_util >= 0.01f) && (perfed_is_stopped == 0u)) {
                                 long ret;
                                 int  status;
 
@@ -595,25 +598,19 @@ static void* perfing_main(void* args) {
                                     }
                                 }
                             }
+#endif
 
                             no_record_aux++;
 #if defined(PRINT_RECORD)
                             fprintf(stdout,
-                                    "         RECORD_AUX :: %20llu %12u %12u \e[0;31m%12llu\e[0m %04llx :: \e[0;31m%12.5lf %12.5lf %12.5lf\e[0m %6u\n",
+                                    "         RECORD_AUX :: %20llu %12u %12u \e[0;31m%12llu %12.5lf\e[0m %6u\n",
                                     perf_record->record_aux.id.time,
                                     perf_record->record_aux.id.cpu,
                                     perf_record->record_aux.id.tid,
                                     rc_aux_size,
-                                    perf_record->record_aux.flags,
                                     aux_util,
-                                    aux_util_avg / ((double) (no_record_aux)),
-                                    aux_ratio,
                                     no_record_aux);
 #endif
-                            if (no_record_aux >= 50u) {
-                                aux_util_avg  = 0.0f;
-                                no_record_aux = 0u;
-                            }
 
                             if (perf_record->record_aux.flags == 0llu) {
                                 if ((rc_aux_offset - rc_aux_ovf + rc_aux_size) >= (aux_size - 0llu)) {
@@ -655,11 +652,15 @@ static void* perfing_main(void* args) {
                                     _mm_sfence();
 
                                     (void) intel_pt_decode(((unsigned char*) (&aux_buffer[ 0u ])),
-                                                           ((unsigned long long int) (rc_aux_size)));
+                                                           ((unsigned long long int) (rc_aux_size)),
+                                                           aux_head,
+                                                           &perf_metadata->aux_head);
                                     rc_aux_ovf = rc_aux_offset + rc_aux_size;
                                 } else {
                                     (void) intel_pt_decode(((unsigned char*) (&perf_aux_buffer[ rc_aux_offset % aux_size ])),
-                                                           ((unsigned long long int) (rc_aux_size)));
+                                                           ((unsigned long long int) (rc_aux_size)),
+                                                           aux_head,
+                                                           &perf_metadata->aux_head);
                                 }
 
                                 __atomic_store_n(&perf_metadata->aux_tail, rc_aux_offset + rc_aux_size, __ATOMIC_RELEASE);
@@ -762,6 +763,16 @@ static void* perfing_main(void* args) {
         fprintf(stderr, "pthread_setaffinity_np failed %s\n", strerror(ret));
     }
 
+    pmu_close();
+    ioctl(perfing_fd, PERF_EVENT_IOC_DISABLE, 0);
+    if (munmap(perf_aux_buffer, perf_metadata->aux_size) != 0) {
+        fprintf(stderr, "munmap AUX failed %s\n", strerror(errno));
+    }
+    if (munmap(perf_metadata, MMAP_SIZE) != 0) {
+        fprintf(stderr, "munmap DATA failed %s\n", strerror(errno));
+    }
+    close(perfing_fd);
+
     unwind_close();
     xed_close();
     kmod_unload();
@@ -820,8 +831,7 @@ static void perfed_setup(void) {
         perf_attrs.context_switch = 1;
         //perf_attrs.aux_output     = 1;
         //perf_attrs.clockid        = CLOCK_MONOTONIC_RAW;
-        perf_attrs.aux_watermark    = 3llu * AUX_BUFFER_SIZE / 4llu;
-        //perf_attrs.aux_sample_size  = N_KB(10);
+        perf_attrs.aux_watermark    = ONE_MB;
 
         perfing_fd = syscall(SYS_perf_event_open,
                              &perf_attrs,

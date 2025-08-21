@@ -48,6 +48,10 @@
 #define CYC_MASK       (0x03u)
 #define SHORT_TNT_MASK (0x01u)
 
+#if 1
+#define AUX_DBG
+#endif
+
 #define PRINT_FORMAT "%10s :: "
 #if 0
 #define PRINT_PT
@@ -99,6 +103,10 @@ typedef struct {
     unsigned long long int ip;  // INTEL_PT_PKT_FUP, INTEL_PT_PKT_TIP_PGE, INTEL_PT_PKT_TIP, INTEL_PT_PKT_TIP_PGD
   } v;
   unsigned long long int   cyc_cnt;
+
+  const volatile unsigned char* x;
+  unsigned char                 y;
+  unsigned long long int        n;
 } intel_pt_pkt_t;
 
 static const char*           intel_pt_pkt_names[ ] = {
@@ -135,7 +143,7 @@ static const char*           intel_pt_pkt_names[ ] = {
 };
 static intel_pt_pkt_t        intel_pt_pkt_hist[ INTEL_PT_PKT_HISTORY ];
 static unsigned int          intel_pt_pkt_hist_idx;
-static const intel_pt_pkt_t* last_intel_pt_pkt_a;
+static intel_pt_pkt_t*       last_intel_pt_pkt_a;
 static const intel_pt_pkt_t* last_intel_pt_pkt_b;
 
 static unsigned long long int last_ip;
@@ -174,13 +182,6 @@ static unsigned int xed_enable = 0u;
 static void print_intel_pt_bytes(const volatile unsigned char* const x,
                                  const unsigned long long int        n,
                                  const unsigned long long int        n_orig) {
-  if (last_intel_pt_pkt_a != NULL) {
-    fprintf(stdout, "A :: %3d\n", last_intel_pt_pkt_a->type);
-  }
-  if (last_intel_pt_pkt_b != NULL) {
-    fprintf(stdout, "B :: %3d\n", last_intel_pt_pkt_b->type);
-  }
-
   fprintf(stdout, "n = %16llu %16llu\n", n_orig, n);
   for (unsigned long long int i = (((n_orig - n) >= 48llu) ? (48llu) : (n_orig - n)); i >= 1llu; i--) {
     const signed long long int j = ((signed long long int) (i));
@@ -238,10 +239,15 @@ static void print_intel_pt_pkt(void) {
       return;
     } else {
       fprintf(stdout,
-              "%4u " PRINT_FORMAT "%16llx\n",
+              "%4u " PRINT_FORMAT "%16llx %20llu :: %16llx %02x %02x %12llu\n",
               j,
               intel_pt_pkt_names[ intel_pt_pkt_hist[ j ].type ],
-              intel_pt_pkt_hist[ j ].v.val);
+              intel_pt_pkt_hist[ j ].v.val,
+              intel_pt_pkt_hist[ j ].cyc_cnt,
+              ((unsigned long long int) (intel_pt_pkt_hist[ j ].x)),
+              ((unsigned int) (intel_pt_pkt_hist[ j ].y)),
+              ((unsigned int) (*intel_pt_pkt_hist[ j ].x)),
+              intel_pt_pkt_hist[ j ].n);
     }
   }
 }
@@ -259,9 +265,11 @@ static const intel_pt_pkt_t* prev_intel_pt_pkt(const intel_pt_pkt_type_t type) {
   return NULL;
 }
 
-static void record_intel_pt_pkt(intel_pt_pkt_type_t          type,
-                                unsigned long long int       val,
-                                const unsigned long long int cyc_cnt) {
+static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
+                                unsigned long long int        val,
+                                const unsigned long long int  cyc_cnt,
+                                const volatile unsigned char* x,
+                                unsigned long long int        n) {
   static const intel_pt_pkt_t* mtc_ref = NULL;
 
   const unsigned int a = is_cyc_eligible(type);
@@ -317,7 +325,10 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t          type,
     .v       = {
       .val   = val
     },
-    .cyc_cnt = ((a == 1u) || (b == 1u)) ? (cyc_cnt) : (0llu)
+    .cyc_cnt = ((a == 1u) || (b == 1u)) ? (cyc_cnt) : (0llu),
+    .x       = x,
+    .y       = *x,
+    .n       = n
   };
   if (type == INTEL_PT_PKT_MTC) {
     mtc_ref = &intel_pt_pkt_hist[ intel_pt_pkt_hist_idx ];
@@ -331,8 +342,8 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
                                         unsigned long long int*        n,
                                         const unsigned long long int   n_orig,
                                         const intel_pt_pkt_type_t      pkt_type) {
-  const volatile unsigned char* x_p      = *x;
-  unsigned long long int        n_p      = *n;
+  const volatile unsigned char* x_p = *x;
+  unsigned long long int        n_p = *n;
 
   unsigned long long int ip             = 0xFFFFFFFFFFFFFFFFllu;
   const unsigned char    ip_bytes       = (((unsigned int) (x_p[ 0u ])) >> 5u) & 0x07u;
@@ -341,6 +352,7 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
 
   (void) (ip_compressed);
 
+  record_intel_pt_pkt(pkt_type, ip, cyc_cnt_ref, x_p, n_p);
   x_p++;
   n_p--;
   switch (ip_bytes) {
@@ -446,19 +458,17 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   }
   if (last_ip_update == 0u) {
   } else if (last_ip_update == 1u) {
+#if defined(AUX_DBG)
     if ((ip != 0llu) && (xed_unwind_find_inst(ip) == NULL)) {
       xed_close();
 
       print_intel_pt_bytes(x_p, n_p, n_orig);
-      fprintf(stdout,
-              "%4u " PRINT_FORMAT "%16llx\n",
-              intel_pt_pkt_hist_idx,
-              intel_pt_pkt_names[ pkt_type ],
-              ip);
       print_intel_pt_pkt();
-
       fprintf(stderr, "ip_decode error :: ip_bytes = %u ip = %16llx last_ip = %16llx\n", ip_bytes, ip, last_ip); for (;;) { }
     }
+#endif
+    last_intel_pt_pkt_a->v.ip = ip;
+
     last_ip = ip;
   } else if (last_ip_update == 2u) {
     fprintf(stderr, "ip_decode error :: 2 ip_bytes = %u n = %llu\n", ip_bytes, n_p); for (;;) { }
@@ -469,7 +479,6 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
 #if defined(PRINT_PT)
   fprintf(stdout, "IP            = %20llx\n", ip);
 #endif
-  record_intel_pt_pkt(pkt_type, ip, cyc_cnt_ref);
   if (ip != 0llu) {
     if (pkt_type == INTEL_PT_PKT_FUP) {
       if ((xed_enable == 0u) && ((last_intel_pt_pkt_b != NULL) && (last_intel_pt_pkt_b->type == INTEL_PT_PKT_OVF))) {
@@ -511,9 +520,12 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   return ip;
 }
 
-unsigned long long int intel_pt_decode(const volatile unsigned char* x,
-                                       unsigned long long int        n) {
-  const unsigned long long int n_orig = n;
+unsigned long long int intel_pt_decode(const volatile unsigned char*    x,
+                                       unsigned long long int           n,
+                                       const unsigned long long int     h,
+                                       volatile unsigned long long int* h_p) {
+  const volatile unsigned char* x_orig = x;
+  const unsigned long long int  n_orig = n;
 
   volatile unsigned int*       x_32;
   volatile unsigned short int* x_16;
@@ -526,24 +538,49 @@ unsigned long long int intel_pt_decode(const volatile unsigned char* x,
 
 decode_again:
   if (n >= 1llu) {
+#if defined(AUX_DBG)
+    if ((last_intel_pt_pkt_a != NULL) && (*last_intel_pt_pkt_a->x != last_intel_pt_pkt_a->y)) {
+      fprintf(stdout,
+              "%4u " PRINT_FORMAT "%16llx %20llu :: %16llx %02x %02x %12llu :: %12llu %12llu :: %12llu %12llu\n",
+              (INTEL_PT_PKT_HISTORY + intel_pt_pkt_hist_idx - 1u) % INTEL_PT_PKT_HISTORY,
+              intel_pt_pkt_names[ last_intel_pt_pkt_a->type ],
+              last_intel_pt_pkt_a->v.val,
+              last_intel_pt_pkt_a->cyc_cnt,
+              ((unsigned long long int) (last_intel_pt_pkt_a->x)),
+              ((unsigned int) (last_intel_pt_pkt_a->y)),
+              ((unsigned int) (*last_intel_pt_pkt_a->x)),
+              last_intel_pt_pkt_a->n,
+              ((unsigned long long int) (last_intel_pt_pkt_a->x)) - ((unsigned long long int) (x_orig)),
+              n_orig - n,
+              h,
+              __atomic_load_n(h_p, __ATOMIC_ACQUIRE));
+
+      xed_close();
+
+      print_intel_pt_bytes(x, n, n_orig);
+      print_intel_pt_pkt();
+      fprintf(stderr, "0 intel_pt_decode error\n"); for (;;) { }
+    }
+#endif
+
     x_32 = ((volatile unsigned int*) (x));
     x_16 = ((volatile unsigned short int*) (x));
     x_8  = ((volatile unsigned char*) (x));
-    //fprintf(stdout, "\tn = %12llu\n", n);
+    //fprintf(stdout, "n = %12llu\n", n);
 
     if ((n >= 4llu) && (*x_32 == PSB)) {
       last_ip = 0llu;
       last_psb++;
 
+      record_intel_pt_pkt(INTEL_PT_PKT_PSB, 0llu, cyc_cnt_ref, x, n);
       x += 4llu;
       n -= 4llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_PSB, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 11llu) && (((*x_32) & MNT_MASK) == MNT)) {
+      record_intel_pt_pkt(INTEL_PT_PKT_MNT, 0llu, cyc_cnt_ref, x, n);
       x += 11llu;
       n -= 11llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_MNT, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 2llu) && (*x_16 == OVF)) {
@@ -558,21 +595,21 @@ decode_again:
       fprintf(stdout, "     OVF      = %20u\n", 0u);
 #endif
 
+      record_intel_pt_pkt(INTEL_PT_PKT_OVF, 0llu, cyc_cnt_ref, x, n);
       x += 2llu;
       n -= 2llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_OVF, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 7llu) && (*x_16 == VMCS)) {
+      record_intel_pt_pkt(INTEL_PT_PKT_VMCS, 0llu, cyc_cnt_ref, x, n);
       x += 7llu;
       n -= 7llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_VMCS, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 10llu) && (*x_16 == MWAIT)) {
+      record_intel_pt_pkt(INTEL_PT_PKT_MWAIT, 0llu, cyc_cnt_ref, x, n);
       x += 10llu;
       n -= 10llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_MWAIT, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 8llu) && (*x_16 == LONG_TNT)) {
@@ -580,21 +617,21 @@ decode_again:
       fprintf(stdout, "LONG_TNT      = %20u\n", 0u);
 //#endif
 
+      record_intel_pt_pkt(INTEL_PT_PKT_LONG_TNT, 0llu, cyc_cnt_ref, x, n);
       x += 8llu;
       n -= 8llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_LONG_TNT, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 7llu) && (*x_16 == PWRX)) {
+      record_intel_pt_pkt(INTEL_PT_PKT_PWRX, 0llu, cyc_cnt_ref, x, n);
       x += 7llu;
       n -= 7llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_PWRX, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 2llu) && (*x_16 == TRACESTOP)) {
+      record_intel_pt_pkt(INTEL_PT_PKT_TRACESTOP, 0llu, cyc_cnt_ref, x, n);
       x += 2llu;
       n -= 2llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_TRACESTOP, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 7llu) && (*x_16 == TSC_MTC)) {
@@ -623,14 +660,14 @@ decode_again:
           fprintf(stderr, "tsc_mtc error 1!\n"); for (;;) { }
       }
 
-      x += 7llu;
-      n -= 7llu;
       if (pkt != NULL) {
         // INTEL_PT_PKT_TSC_MTC is in fact a INTEL_PT_PKT_MTC packet.
         // TSC_MTC it not cyc eligibale but the corresponding TSC is.
         // As such, this fake MTC packet gets the cyc_cnt of the TSC packet.
-        record_intel_pt_pkt(INTEL_PT_PKT_TSC_MTC, tsc_ref_ctc, tsc_ref_cyc_cnt);
+        record_intel_pt_pkt(INTEL_PT_PKT_TSC_MTC, tsc_ref_ctc, tsc_ref_cyc_cnt, x, n);
       }
+      x += 7llu;
+      n -= 7llu;
       goto decode_again;
     }
     if ((n >= 3llu) && (*x_16 == BBP)) {
@@ -651,15 +688,15 @@ decode_again:
       fprintf(stdout, "BBP SZ        = %20u\n", last_bbp_sz);
 #endif
 
+      record_intel_pt_pkt(INTEL_PT_PKT_BBP, ((unsigned long long int) (last_bbp_type)), cyc_cnt_ref, x, n);
       x += 3llu;
       n -= 3llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_BBP, ((unsigned long long int) (last_bbp_type)), cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 11llu) && (*x_16 == EVD)) {
+      record_intel_pt_pkt(INTEL_PT_PKT_EVD, 0llu, cyc_cnt_ref, x, n);
       x += 11llu;
       n -= 11llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_EVD, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 8llu) && (*x_16 == PIP)) {
@@ -670,9 +707,9 @@ decode_again:
                                          ((((unsigned long long int) (x[ 3u ])) & 0xFFllu) << 12llu) |
                                          ((((unsigned long long int) (x[ 2u ])) & 0xFEllu) <<  4llu);
 
+      record_intel_pt_pkt(INTEL_PT_PKT_PIP, cr3, cyc_cnt_ref, x, n);
       x += 8llu;
       n -= 8llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_PIP, cr3, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 2llu) && (*x_16 == PSBEND)) {
@@ -681,21 +718,21 @@ decode_again:
       }
       last_psb = 0u;
 
+      record_intel_pt_pkt(INTEL_PT_PKT_PSBEND, 0llu, cyc_cnt_ref, x, n);
       x += 2llu;
       n -= 2llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_PSBEND, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 4llu) && (*x_16 == PWRE)) {
+      record_intel_pt_pkt(INTEL_PT_PKT_PWRE, 0llu, cyc_cnt_ref, x, n);
       x += 4llu;
       n -= 4llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_PWRE, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 4llu) && (*x_16 == CFE)) {
+      record_intel_pt_pkt(INTEL_PT_PKT_CFE, 0llu, cyc_cnt_ref, x, n);
       x += 4llu;
       n -= 4llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_CFE, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 4llu) && (*x_16 == CBR)) {
@@ -708,15 +745,15 @@ decode_again:
       fprintf(stdout, "CBR           = %20.2lf GHz\n", ((double) (cbr_factor)));
 #endif
 
+      record_intel_pt_pkt(INTEL_PT_PKT_CBR, cbr, cyc_cnt_ref, x, n);
       x += 4llu;
       n -= 4llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_CBR, cbr, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 2llu) && (((*x_16) & EXSTOP_MASK) == EXSTOP)) {
+      record_intel_pt_pkt(INTEL_PT_PKT_EXSTOP, 0llu, cyc_cnt_ref, x, n);
       x += 2llu;
       n -= 2llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_EXSTOP, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 2llu) && (((*x_16) & BEP_MASK) == BEP)) {
@@ -730,9 +767,9 @@ decode_again:
       fprintf(stdout, "BEP FUP       = %20u\n", last_bep_fup);
 #endif
 
+      record_intel_pt_pkt(INTEL_PT_PKT_BEP, ((unsigned long long int) (last_bep_fup)), cyc_cnt_ref, x, n);
       x += 2llu;
       n -= 2llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_BEP, ((unsigned long long int) (last_bep_fup)), cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 10llu) && (((*x_16) & PTW_MASK) == PTW)) {
@@ -757,25 +794,25 @@ decode_again:
       }
 #endif
 
+      record_intel_pt_pkt(INTEL_PT_PKT_PTW, ptw, cyc_cnt_ref, x, n);
       x += 10llu;
       n -= 10llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_PTW, ptw, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 2llu) && (*x_8 == MODE)) {
+      record_intel_pt_pkt(INTEL_PT_PKT_MODE, ((unsigned long long int) (x[ 1u ])), cyc_cnt_ref, x, n);
       x += 2llu;
       n -= 2llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_MODE, ((unsigned long long int) (x[ 1u ])), cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 2llu) && (*x_8 == MTC)) {
       const unsigned long long int ctc = ((unsigned long long int) (x[ 1u ]));
 
+      if (tsc_ref != 0.0f) {
+        record_intel_pt_pkt(INTEL_PT_PKT_MTC, ctc, cyc_cnt_ref, x, n);
+      }
       x += 2llu;
       n -= 2llu;
-      if (tsc_ref != 0.0f) {
-        record_intel_pt_pkt(INTEL_PT_PKT_MTC, ctc, cyc_cnt_ref);
-      }
       goto decode_again;
     }
     if ((n >= 8llu) && (*x_8 == TSC)) {
@@ -791,15 +828,15 @@ decode_again:
       fprintf(stdout, "TSC           = %20.2lf\n", ((double) (tsc)));
 #endif
 
+      record_intel_pt_pkt(INTEL_PT_PKT_TSC, tsc, cyc_cnt_ref, x, n);
       x += 8llu;
       n -= 8llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_TSC, tsc, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 1llu) && (*x_8 == PAD)) {
+      record_intel_pt_pkt(INTEL_PT_PKT_PAD, 0llu, cyc_cnt_ref, x, n);
       x += 1llu;
       n -= 1llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_PAD, 0llu, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & FUP_MASK) == FUP)) {
@@ -861,9 +898,9 @@ decode_again:
         }
       }
 
+      record_intel_pt_pkt(INTEL_PT_PKT_BIP, bip_payload, cyc_cnt_ref, x, n);
       x += 9llu;
       n -= 9llu;
-      record_intel_pt_pkt(INTEL_PT_PKT_BIP, bip_payload, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & CYC_MASK) == CYC)) {
@@ -871,6 +908,7 @@ decode_again:
       unsigned long long int cyc = (((unsigned long long int) (x[ 0u ])) >> 3llu) & 0x1Fllu;
       unsigned int           exp = (((unsigned int)           (x[ 0u ])) >> 2llu) & 0x01llu;
 
+      record_intel_pt_pkt(INTEL_PT_PKT_CYC, 0llu, cyc_cnt_ref, x, n);
       x++;
       n--;
       if (exp == 1u) {
@@ -891,7 +929,6 @@ cyc_again:
       }
       cyc_cnt_ref += cyc;
 
-      record_intel_pt_pkt(INTEL_PT_PKT_CYC, cyc, cyc_cnt_ref);
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & SHORT_TNT_MASK) == SHORT_TNT)) {
@@ -899,8 +936,6 @@ cyc_again:
       const unsigned int short_tnt = ((unsigned int) (x[ 0u ]));
 
       asm volatile ("bsr %1, %0": "=r"(p_one) : "r"(short_tnt) : );
-
-      record_intel_pt_pkt(INTEL_PT_PKT_SHORT_TNT, ((unsigned long long int) (short_tnt)), cyc_cnt_ref);
       if (xed_enable == 1u) {
         xed_process_branches((short_tnt >> 1u) & ((1u << (p_one - 1u)) - 1u),
                              p_one - 1u,
@@ -909,6 +944,7 @@ cyc_again:
                              cyc_cnt_ref);
       }
 
+      record_intel_pt_pkt(INTEL_PT_PKT_SHORT_TNT, ((unsigned long long int) (short_tnt)), cyc_cnt_ref, x, n);
       x += 1llu;
       n -= 1llu;
       goto decode_again;
@@ -920,7 +956,7 @@ cyc_again:
 
     print_intel_pt_bytes(x, n, n_orig);
     print_intel_pt_pkt();
-    fprintf(stderr, "intel_pt_decode error\n"); for (;;) { }
+    fprintf(stderr, "1 intel_pt_decode error\n"); for (;;) { }
   }
 
   return n;

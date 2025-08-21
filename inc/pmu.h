@@ -8,5 +8,6 @@ extern void perfed_pmu(const pid_t perfed_pid,
                        const int   intel_pt_fd);
 
 extern unsigned int pmu_info(const unsigned long long int pmu_mask);
+extern void pmu_close(void);
 
 #endif

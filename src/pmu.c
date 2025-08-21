@@ -36,9 +36,11 @@
 #define GEN_PMU_MEM_LOAD_UOPS_RETIRED_DRAM_HIT ((__u64) (0x80D1llu))
 
 typedef struct {
-  __u64        config;
-  unsigned int precise_ip;
-  const char*  name;
+  int                          fd;
+  struct perf_event_mmap_page* pg;
+  __u64                        config;
+  unsigned int                 precise_ip;
+  const char*                  name;
 } pmu_t;
 
 static pmu_t pmus[ 64u ];
@@ -87,12 +89,14 @@ static const char* get_pmu_name(const __u64 config) {
   }
 }
 
-static void update_pmu(const __u64 config, const unsigned int precise_ip) {
+static void update_pmu(const int fd, struct perf_event_mmap_page* pg, const __u64 config, const unsigned int precise_ip) {
   static unsigned int no_fix = 0u;
   static unsigned int no_gen = 0u;
 
   if (config == FIXED_PMU_INST_RETIRED_ANY) {
     pmus[ 32u + no_fix ] = (pmu_t) {
+      .fd         = fd,
+      .pg         = pg,
       .config     = config,
       .precise_ip = precise_ip,
       .name       = get_pmu_name(config)
@@ -100,6 +104,8 @@ static void update_pmu(const __u64 config, const unsigned int precise_ip) {
     no_fix++;
   } else {
     pmus[  0u + no_gen ] = (pmu_t) {
+      .fd         = fd,
+      .pg         = pg,
       .config     = config,
       .precise_ip = precise_ip,
       .name       = get_pmu_name(config)
@@ -163,7 +169,7 @@ static int install_pmu(const __u64        config,
       ioctl(pmu_fd, PERF_EVENT_IOC_RESET, 0);
       ioctl(pmu_fd, PERF_EVENT_IOC_ENABLE, 0);
 
-      update_pmu(config, precise_ip);
+      update_pmu(pmu_fd, pmu_mem, config, precise_ip);
       fprintf(stdout,
               "\t[%8d %3d] :: %04llX %08x :: %u -> %s\n",
               perfed_pid,
@@ -251,4 +257,14 @@ unsigned int pmu_info(const unsigned long long int pmu_mask) {
   }
 
   return n;
+}
+
+void pmu_close(void) {
+  for (unsigned long long int i = 0llu; i < 64llu; i++) {
+    if (pmus[ i ].fd >= 1) {
+      ioctl(pmus[ i ].fd, PERF_EVENT_IOC_DISABLE, 0);
+      munmap(pmus[ i ].pg, 4096);
+      close(pmus[ i ].fd);
+    }
+  }
 }

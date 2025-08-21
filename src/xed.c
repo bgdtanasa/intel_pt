@@ -520,11 +520,11 @@ void xed_intel_pt_tip_disable(const double                 tsc,
 
   if (tnt_queue_head != tnt_queue_tail) {
     fflush(branches_fp);
-    fprintf(stderr, "BR Queue TIP_PGD\n"); //for (;;) {}
+    fprintf(stderr, "BR Queue TIP_PGD\n"); for (;;) {}
   }
   if (tip_queue_head != tip_queue_tail) {
     fflush(branches_fp);
-    fprintf(stderr, "TIP Queue TIP_PGD\n"); //for (;;) {}
+    fprintf(stderr, "TIP Queue TIP_PGD\n"); for (;;) {}
   }
 
   fprintf(branches_fp, "D :: %20.2lf\n", tsc);
