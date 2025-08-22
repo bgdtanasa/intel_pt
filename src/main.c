@@ -33,6 +33,9 @@
 #include "x_unwind.h"
 
 #if 0
+#define DO_UNWIND
+#endif
+#if 0
 #define PRINT_RECORD
 #endif
 
@@ -465,12 +468,14 @@ static void* perfing_main(void* args) {
         const __u64  perf_header_sz = ((__u64) (sizeof(struct perf_event_header)));
         __u64        perf_record_sz = 0llu;
 
-        struct timespec a;
-        struct timespec b;
-        struct timespec c;
+#if defined(PRINT_RECORD)
+        struct timespec a = { 0 };
+        struct timespec b = { 0 };
+        struct timespec c = { 0 };
         signed long long int ts_0 = 0ll;
         signed long long int ts_1 = 0ll;
         signed long long int ts_2 = 0ll;
+#endif
 
         perfing_is_running = 1u;
         fprintf(stdout,
@@ -506,7 +511,9 @@ static void* perfing_main(void* args) {
         perf_record = ((perf_record_t*) (data_buffer));
         ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
         for (;;) {
+#if defined(PRINT_RECORD)
             clock_gettime(CLOCK_MONOTONIC, &a);
+#endif
 
             data_head = __atomic_load_n(&perf_metadata->data_head, __ATOMIC_ACQUIRE);
             if (data_tail + perf_header_sz <= data_head) {
@@ -537,7 +544,6 @@ static void* perfing_main(void* args) {
                         } break;
 
                         case PERF_RECORD_AUX: {
-                            static __u64 rc_aux_ovf    = 0llu;
                             const __u64  aux_head      = __atomic_load_n(&perf_metadata->aux_head, __ATOMIC_ACQUIRE);
                             const __u64  aux_tail      = __atomic_load_n(&perf_metadata->aux_tail, __ATOMIC_ACQUIRE);
                             const __u64  rc_aux_offset = perf_record->record_aux.aux_offset;
@@ -558,7 +564,7 @@ static void* perfing_main(void* args) {
 
                             // Periodic unwinding by stopping the perfed pid
                             aux_util = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
-#if 0
+#if defined(DO_UNWIND)
                             if ((aux_util >= 0.01f) && (perfed_is_stopped == 0u)) {
                                 long ret;
                                 int  status;
@@ -589,9 +595,11 @@ static void* perfing_main(void* args) {
                                             perfed_is_stopped = 1u;
                                             ioctl(perfing_fd, PERF_EVENT_IOC_DISABLE, 0);
 
+#if defined(PRINT_RECORD)
                                             clock_gettime(CLOCK_MONOTONIC, &b);
                                             ts_0 = ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec));
                                             fprintf(stdout, "attach ts = %12lld ns\n", ts_0);
+#endif
                                         }
                                     } else {
                                         fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
@@ -613,14 +621,17 @@ static void* perfing_main(void* args) {
 #endif
 
                             if (perf_record->record_aux.flags == 0llu) {
-                                if ((rc_aux_offset - rc_aux_ovf + rc_aux_size) >= (aux_size - 0llu)) {
+                                if (((rc_aux_offset % aux_size) + rc_aux_size) >= aux_size) {
                                     __u64       j   = 0llu;
                                     const __u64 j_a = AUX_ALIGNMENT * (rc_aux_size / AUX_ALIGNMENT);
                                     const __u64 j_b = rc_aux_size % AUX_ALIGNMENT;
 
-                                    // Check buffer size
+                                    // Some sanity checks
                                     if (rc_aux_size > AUX_BUFFER_SIZE) {
-                                        fprintf(stderr, "AUX buffer too small %10llu vs %10llu!\n", AUX_BUFFER_SIZE, rc_aux_size); for (;;) {}
+                                        fprintf(stderr,
+                                                "PERF_RECORD_AUX aux_buffer error :: %10llu vs %10llu!\n",
+                                                AUX_BUFFER_SIZE,
+                                                rc_aux_size); for (;;) {}
                                     }
                                     // Perform non-temporal copy
                                     for (j = 0llu; j < j_a; j += AUX_ALIGNMENT) {
@@ -655,7 +666,6 @@ static void* perfing_main(void* args) {
                                                            ((unsigned long long int) (rc_aux_size)),
                                                            aux_head,
                                                            &perf_metadata->aux_head);
-                                    rc_aux_ovf = rc_aux_offset + rc_aux_size;
                                 } else {
                                     (void) intel_pt_decode(((unsigned char*) (&perf_aux_buffer[ rc_aux_offset % aux_size ])),
                                                            ((unsigned long long int) (rc_aux_size)),
@@ -730,9 +740,9 @@ static void* perfing_main(void* args) {
                         } break;
                     }
                 }
+#if defined(PRINT_RECORD)
                 clock_gettime(CLOCK_MONOTONIC, &c);
                 ts_1 = ((signed long long) (c.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - a.tv_nsec));
-#if defined(PRINT_RECORD)
                 fprintf(stdout, "record ts = %12lld ns\n", ts_1);
 #endif
             } else {
@@ -740,9 +750,11 @@ static void* perfing_main(void* args) {
                     perfed_is_stopped = 0u;
                     ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
 
+#if defined(PRINT_RECORD)
                     clock_gettime(CLOCK_MONOTONIC, &c);
                     ts_2 = ((signed long long) (c.tv_sec - b.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - b.tv_nsec));
                     fprintf(stdout, "detach ts = %12lld ms\n", ts_2 / 1000ll / 1000ll);
+#endif
                 }
             }
 
