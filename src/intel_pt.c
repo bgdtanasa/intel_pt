@@ -153,8 +153,12 @@ static unsigned int           last_bbp;
 static unsigned int           last_bbp_type;
 static unsigned int           last_bbp_sz;
 static unsigned long long int bip_ip;
-static unsigned int           bip_n;
+static unsigned long long int bip_pmu_mask;
 static unsigned long long int bip_tsc;
+static unsigned long long int bip_mem_access_addr;
+static unsigned long long int bip_mem_aux_info;
+static unsigned long long int bip_mem_access_lat;
+static unsigned long long int bip_tsx_aux_info;
 static unsigned int           last_bep_fup;
 
 static double                 tsc_approx_ctc;
@@ -487,7 +491,7 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
         xed_update_last_inst(ip);
 
 #if defined(PRINT_PT)
-        fprintf(stdout, " OVF FUP      = %20llx %3d\n", ip, last_intel_pt_pkt_b->type);
+        fprintf(stdout, " FUP OVF      = %20llx %3d\n", ip, last_intel_pt_pkt_b->type);
 #endif
       }
     } else if (pkt_type == INTEL_PT_PKT_TIP_PGE) {
@@ -585,6 +589,22 @@ decode_again:
     }
     if ((n >= 2llu) && (*x_16 == OVF)) {
       if (last_bbp == 1u) {
+        // An OVF always ends a BBP
+        last_bbp      = 0u;
+        last_bbp_type = 0xFFFFFFFFu;
+        last_bbp_sz   = 0u;
+
+        bip_ip       = 0llu;
+        bip_pmu_mask = 0llu;
+        bip_tsc      = 0llu;
+
+        bip_mem_access_addr = 0llu;
+        bip_mem_aux_info    = 0llu;
+        bip_mem_access_lat  = 0llu;
+        bip_tsx_aux_info    = 0llu;
+
+        last_bep_fup = 0u;
+
         fprintf(stdout, " OVF BBP      = %20llx\n", 0llu);
       }
 
@@ -671,16 +691,15 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 3llu) && (*x_16 == BBP)) {
-      if (last_bbp == 1u) {
-        fprintf(stdout, " BBP BBP      = %20llx\n", 0llu);
-      }
-
       last_bbp      = 1u;
       last_bbp_type = (((unsigned int) (x[ 2u ])) >> 0u) & 0x1Fu;
       last_bbp_sz   = (((unsigned int) (x[ 2u ])) >> 7u) & 0x01u;
 
+      if ((last_bbp_type != 0x04u) && (last_bbp_type != 0x05u)) {
+        fprintf(stderr, "BBP TYPE      = %20u\n", last_bbp_type); for (;;) { }
+      }
       if (last_bbp_sz == 1u) {
-        fprintf(stderr, "4 Bytes BIP\n"); for (;;) { }
+        fprintf(stderr, "BBP SZ        = %20u\n", last_bbp_sz); for (;;) { }
       }
 
 #if defined(PRINT_PT)
@@ -843,16 +862,22 @@ decode_again:
       const unsigned long long int fup = ip_decode(&x, &n, n_orig, INTEL_PT_PKT_FUP);
 
       if (last_bep_fup == 1u) {
-        if (bip_n >= 1u) {
 #if defined(PRINT_PT)
-          fprintf(stdout, "BIP FUP       = %20llx %20.2lf %20llx\n", bip_ip, ((double) (bip_tsc)), fup);
+        fprintf(stdout, "FUP BEP       = %20llx\n", fup);
 #endif
 
-          xed_intel_pt_bip_fup(bip_ip, fup, bip_tsc);
+        if (bip_pmu_mask != 0llu) {
+          xed_intel_pt_bip_fup(bip_ip, fup, bip_tsc, bip_pmu_mask, bip_mem_access_addr);
         }
         bip_ip       = 0llu;
-        bip_n        = 0u;
+        bip_pmu_mask = 0llu;
         bip_tsc      = 0llu;
+
+        bip_mem_access_addr = 0llu;
+        bip_mem_aux_info    = 0llu;
+        bip_mem_access_lat  = 0llu;
+        bip_tsx_aux_info    = 0llu;
+
         last_bep_fup = 0u;
       }
       goto decode_again;
@@ -888,7 +913,11 @@ decode_again:
           fprintf(stdout, "BIP IP        = %20llx\n", bip_payload);
 #endif
         } else if (bip_id == 0x01u) {
-          bip_n = pmu_info(bip_payload);
+          bip_pmu_mask = bip_payload;
+
+#if defined(PRINT_PT)
+          fprintf(stdout, "BIP PMU       = %20llx\n", bip_payload);
+#endif
         } else if (bip_id == 0x02u) {
           bip_tsc = bip_payload;
 
@@ -896,6 +925,34 @@ decode_again:
           fprintf(stdout, "BIP TSC       = %20.2lf\n", ((double) (bip_payload)));
 #endif
         }
+      } else if (last_bbp_type == 0x05u) {
+        if (bip_id == 0x00u) {
+          bip_mem_access_addr = bip_payload;
+
+#if defined(PRINT_PT)
+          fprintf(stdout, "BIP MEM ADDR  = %20llx\n", bip_payload);
+#endif
+        } else if (bip_id == 0x01u) {
+          bip_mem_aux_info = bip_payload;
+
+#if defined(PRINT_PT)
+          fprintf(stdout, "BIP MEM AUX   = %20llx\n", bip_payload);
+#endif
+        } else if (bip_id == 0x02u) {
+          bip_mem_access_lat = bip_payload;
+
+#if defined(PRINT_PT)
+          fprintf(stdout, "BIP MEM LAT   = %20llx\n", bip_payload);
+#endif
+        } else if (bip_id == 0x03u) {
+          bip_tsx_aux_info = bip_payload;
+
+#if defined(PRINT_PT)
+          fprintf(stdout, "BIP TSX AUX   = %20llx\n", bip_payload);
+#endif
+        }
+      } else {
+
       }
 
       record_intel_pt_pkt(INTEL_PT_PKT_BIP, bip_payload, cyc_cnt_ref, x, n);

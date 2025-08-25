@@ -1,4 +1,5 @@
 #include "xed.h"
+#include "pmu.h"
 
 #include <string.h>
 #include <errno.h>
@@ -480,7 +481,7 @@ void perfed_xed(const int perfed_pid) {
   }
 
   xed_tables_init();
-  xed_get_chip_features(&chip_features, XED_CHIP_ALL); //XED_CHIP_SNOW_RIDGE);
+  xed_get_chip_features(&chip_features, XED_CHIP_ALL);
 
   branches_fp = fopen("branches.log", "w");
   if (branches_fp == NULL) {
@@ -510,8 +511,11 @@ void xed_intel_pt_tip_enable(const unsigned long long int tip,
 
 void xed_intel_pt_bip_fup(const unsigned long long int a,
                           const unsigned long long int b,
-                          const double                 tsc) {
-  fprintf(branches_fp, "F :: %20.2lf %16llx %16llx\n", tsc, a, b);
+                          const double                 tsc,
+                          const unsigned long long int pmu_mask,
+                          const unsigned long long int mem_addr) {
+  fprintf(branches_fp, "F :: %20.2lf %16llx %16llx :: %016llx %16llx\n", tsc, a, b, pmu_mask, mem_addr);
+  pmu_info(pmu_mask, branches_fp);
 }
 
 void xed_intel_pt_tip_disable(const double                 tsc,
@@ -528,6 +532,16 @@ void xed_intel_pt_tip_disable(const double                 tsc,
   }
 
   fprintf(branches_fp, "D :: %20.2lf\n", tsc);
+}
+
+void xed_tid_switch(const double       tsc,
+                    const unsigned int sw_out) {
+
+  if (sw_out == 1u) {
+    fprintf(branches_fp, "Y :: %20.2lf\n", tsc);
+  } else {
+    fprintf(branches_fp, "X :: %20.2lf\n", tsc);
+  }
 }
 
 void xed_reset_last_inst(void) {
@@ -607,6 +621,9 @@ void xed_process_branches(const unsigned int           tnt,
     }
   }
 
+#if !defined(PRINT_XED) && !defined(PRINT_XED_BRANCHES_ONLY)
+  fprintf(branches_fp, "%16llx\n", insts[ last_inst ].addr);
+#endif
   for (;;) {
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
 #if defined(PRINT_XED_BRANCHES_ONLY)
@@ -671,12 +688,16 @@ void xed_process_branches(const unsigned int           tnt,
           if (br != 0u) {
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
             fprintf(branches_fp, "%s -> %16llx 1 :: %20.2lf\n", &branches_buffer[ 0u ], insts[ last_inst ].cofi.u.j.addr, x_tnt->tsc);
+#else
+            fprintf(branches_fp, "%16llx 1 :: %20.2lf\n", insts[ last_inst ].cofi.u.j.addr, x_tnt->tsc);
 #endif
             branches_n++;
             xed_update_last_inst(insts[ last_inst ].cofi.u.j.addr);
           } else {
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
             fprintf(branches_fp, "%s -> %16llx 0 :: %20.2lf\n", &branches_buffer[ 0u ], insts[ last_inst + 1ll ].addr, x_tnt->tsc);
+#else
+            fprintf(branches_fp, "%16llx 0 :: %20.2lf\n", insts[ last_inst + 1ll ].addr, x_tnt->tsc);
 #endif
             branches_n++;
             last_inst++;

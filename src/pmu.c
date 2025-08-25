@@ -18,9 +18,10 @@
 #endif
 
 #define PMU_PDIST_PERIOD     (128llu)
-#define PMU_PDIST_NO_PERIODS (32llu)
+#define PMU_PDIST_NO_PERIODS (1llu)
+#define PMU_PERIOD           (1llu)
 
-#define FIXED_PMU_INST_RETIRED_ANY       ((__u64) (0x00C0llu))
+#define FIXED_PMU_INST_RETIRED_ANY ((__u64) (0x00C0llu))
 
 #define GEN_PMU_BR_INST_RETIRED_ALL_BRANCHES ((__u64) (0x00C4llu))
 #define GEN_PMU_BR_INST_RETIRED_TAKEN_JCC    ((__u64) (0xFEC4llu))
@@ -143,11 +144,12 @@ static int install_pmu(const __u64        config,
   perf_attrs.type           = 10u; //PERF_TYPE_RAW;
   perf_attrs.size           = sizeof(struct perf_event_attr);
   perf_attrs.config         = config;
-  perf_attrs.sample_period  = (precise_ip == 1u) ? (PMU_PDIST_NO_PERIODS * PMU_PDIST_PERIOD) : (2llu);
-  perf_attrs.sample_type    = PERF_SAMPLE_IP   |
-                              PERF_SAMPLE_TID  |
-                              PERF_SAMPLE_TIME |
-                              PERF_SAMPLE_CPU;
+  perf_attrs.sample_period  = (precise_ip == 1u) ? (PMU_PDIST_NO_PERIODS * PMU_PDIST_PERIOD) : (PMU_PERIOD);
+  perf_attrs.sample_type    = PERF_SAMPLE_IP        |
+                              PERF_SAMPLE_TID       |
+                              PERF_SAMPLE_TIME      |
+                              PERF_SAMPLE_CPU       |
+                              PERF_SAMPLE_DATA_SRC;
   perf_attrs.read_format    = PERF_FORMAT_ID;
   perf_attrs.disabled       = 1;
   perf_attrs.exclude_kernel = 1;
@@ -155,6 +157,7 @@ static int install_pmu(const __u64        config,
   perf_attrs.precise_ip     = (precise_ip == 1u) ? (3u) : (2u);
   perf_attrs.sample_id_all  = 1;
   perf_attrs.aux_output     = 1;
+  perf_attrs.clockid        = CLOCK_MONOTONIC_RAW;
 
   pmu_fd = syscall(SYS_perf_event_open,
                    &perf_attrs,
@@ -187,76 +190,36 @@ static int install_pmu(const __u64        config,
 }
 
 void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt_fd) {
-  //return;
   int cnt_fd;
 
   fprintf(stdout, "====== PMU ======\n");
-  cnt_fd = install_pmu(FIXED_PMU_INST_RETIRED_ANY,
-                       1u,
-                       perfed_pid,
-                       perfed_cpu,
-                       intel_pt_fd);
-  cnt_fd = install_pmu(GEN_PMU_BR_INST_RETIRED_ALL_BRANCHES,
-                       1u,
-                       perfed_pid,
-                       perfed_cpu,
-                       intel_pt_fd);
-#if 0
-  cnt_fd = install_pmu(GEN_PMU_BR_MISP_RETIRED_ALL_BRANCHES,
-                       0u,
-                       perfed_pid,
-                       perfed_cpu,
-                       intel_pt_fd);
-  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L1_HIT,
-                       0u,
-                       perfed_pid,
-                       perfed_cpu,
-                       intel_pt_fd);
-  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L1_MISS,
-                       0u,
-                       perfed_pid,
-                       perfed_cpu,
-                       intel_pt_fd);
-  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L2_HIT,
-                       0u,
-                       perfed_pid,
-                       perfed_cpu,
-                       intel_pt_fd);
-  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L2_MISS,
-                       0u,
-                       perfed_pid,
-                       perfed_cpu,
-                       intel_pt_fd);
-  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L3_HIT,
-                       0u,
-                       perfed_pid,
-                       perfed_cpu,
-                       intel_pt_fd);
-  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_DRAM_HIT,
-                       0u,
-                       perfed_pid,
-                       perfed_cpu,
-                       intel_pt_fd);
-#endif
+  // Fixed counters
+  cnt_fd = install_pmu(FIXED_PMU_INST_RETIRED_ANY,            1u, perfed_pid, perfed_cpu, intel_pt_fd);
+
+  // General counters
+  //cnt_fd = install_pmu(GEN_PMU_BR_INST_RETIRED_ALL_BRANCHES,  1u, perfed_pid, perfed_cpu, intel_pt_fd);
+  //cnt_fd = install_pmu(GEN_PMU_BR_MISP_RETIRED_ALL_BRANCHES,  0u, perfed_pid, perfed_cpu, intel_pt_fd);
+  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L1_MISS,  1u, perfed_pid, perfed_cpu, intel_pt_fd);
+  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L1_HIT,   0u, perfed_pid, perfed_cpu, intel_pt_fd);
+  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L2_MISS,  0u, perfed_pid, perfed_cpu, intel_pt_fd);
+  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L2_HIT,   0u, perfed_pid, perfed_cpu, intel_pt_fd);
+  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_DRAM_HIT, 0u, perfed_pid, perfed_cpu, intel_pt_fd);
+  cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L3_HIT,   0u, perfed_pid, perfed_cpu, intel_pt_fd);
   fprintf(stdout, "====== PMU ======\n");
 
   (void) (cnt_fd);
 }
 
-unsigned int pmu_info(const unsigned long long int pmu_mask) {
-  unsigned int n = 0u;
-
+void pmu_info(const unsigned long long int pmu_mask, FILE* fp) {
   for (unsigned long long int i = 0llu; i < 64llu; i++) {
     if (pmu_mask & (1llu << i)) {
-      n += pmus[ i ].precise_ip;
-
-#if defined(PRINT_PMU)
-      fprintf(stdout, "BIP PMU[ %2llu ] = %20u %64.64s\n", i, pmus[ i ].precise_ip, pmus[ i ].name);
-#endif
+      fprintf((fp == NULL) ? (stdout) : (fp),
+              "PMU[ %2llu ] = %2u %64.64s\n",
+              i,
+              pmus[ i ].precise_ip,
+              pmus[ i ].name);
     }
   }
-
-  return n;
 }
 
 void pmu_close(void) {

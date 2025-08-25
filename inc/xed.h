@@ -98,9 +98,15 @@ extern void xed_intel_pt_tip_enable(const unsigned long long int tip,
                                     const unsigned long long int cyc_cnt);
 extern void xed_intel_pt_bip_fup(const unsigned long long int a,
                                  const unsigned long long int b,
-                                 const double                 tsc);
+                                 const double                 tsc,
+                                 const unsigned long long int pmu_mask,
+                                 const unsigned long long int mem_addr);
 extern void xed_intel_pt_tip_disable(const double                 tsc,
                                      const unsigned long long int cyc_cnt);
+
+extern void xed_tid_switch(const double       tsc,
+                           const unsigned int sw_out);
+
 extern void xed_reset_last_inst(void);
 extern void xed_update_last_inst(const unsigned long long addr);
 extern void xed_process_branches(const unsigned int           tnt,

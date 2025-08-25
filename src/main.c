@@ -76,7 +76,7 @@
 
 #define MMAP_DATA_NO_PAGES (12llu)
 #define MMAP_SIZE          ((1llu + (1llu << (MMAP_DATA_NO_PAGES))) * (ONE_PAGE))
-#define MMAP_AUX_NO_PAGES  (15llu)
+#define MMAP_AUX_NO_PAGES  (17llu)
 #define MMAP_AUX_SIZE      ((1llu << (MMAP_AUX_NO_PAGES)) * (ONE_PAGE))
 
 #define DATA_BUFFER_SIZE (N_MB(2llu))
@@ -458,8 +458,9 @@ static void* perfing_main(void* args) {
         unsigned int no_record_aux    = 0u;
         unsigned int no_record_switch = 0u;
 
-        double aux_util    = 0.0f;
-        double switch_util = 0.0f;
+        double aux_util     = 0.0f;
+        double aux_util_max = 0.0f;
+        double switch_util  = 0.0f;
 
         const __u64  data_size      = perf_metadata->data_size;
         __u64        data_tail      = __atomic_load_n(&perf_metadata->data_tail, __ATOMIC_ACQUIRE);
@@ -544,10 +545,10 @@ static void* perfing_main(void* args) {
                         } break;
 
                         case PERF_RECORD_AUX: {
-                            const __u64  aux_head      = __atomic_load_n(&perf_metadata->aux_head, __ATOMIC_ACQUIRE);
-                            const __u64  aux_tail      = __atomic_load_n(&perf_metadata->aux_tail, __ATOMIC_ACQUIRE);
-                            const __u64  rc_aux_offset = perf_record->record_aux.aux_offset;
-                            const __u64  rc_aux_size   = perf_record->record_aux.aux_size;
+                            const __u64 aux_head      = __atomic_load_n(&perf_metadata->aux_head, __ATOMIC_ACQUIRE);
+                            const __u64 aux_tail      = __atomic_load_n(&perf_metadata->aux_tail, __ATOMIC_ACQUIRE);
+                            const __u64 rc_aux_offset = perf_record->record_aux.aux_offset;
+                            const __u64 rc_aux_size   = perf_record->record_aux.aux_size;
 
                             // Some sanity checks
                             if (aux_util > 1.0f) {
@@ -564,6 +565,9 @@ static void* perfing_main(void* args) {
 
                             // Periodic unwinding by stopping the perfed pid
                             aux_util = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
+                            if (aux_util > aux_util_max) {
+                                aux_util_max = aux_util;
+                            }
 #if defined(DO_UNWIND)
                             if ((aux_util >= 0.01f) && (perfed_is_stopped == 0u)) {
                                 long ret;
@@ -611,12 +615,13 @@ static void* perfing_main(void* args) {
                             no_record_aux++;
 #if defined(PRINT_RECORD)
                             fprintf(stdout,
-                                    "         RECORD_AUX :: %20llu %12u %12u \e[0;31m%12llu %12.5lf\e[0m %6u\n",
+                                    "         RECORD_AUX :: %20llu %12u %12u \e[0;31m%12llu %12.5lf %12.5lf\e[0m %6u\n",
                                     perf_record->record_aux.id.time,
                                     perf_record->record_aux.id.cpu,
                                     perf_record->record_aux.id.tid,
                                     rc_aux_size,
                                     aux_util,
+                                    aux_util_max,
                                     no_record_aux);
 #endif
 
@@ -730,9 +735,8 @@ static void* perfing_main(void* args) {
                                     (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? ("ON  -> OFF") : ("OFF ->  ON"),
                                     no_record_switch);
 #endif
-                            if (no_record_switch >= 50u) {
-                                no_record_switch = 0u;
-                            }
+                            xed_tid_switch(((double) (perf_record->record_switch.id.time)) / tsc_hz_ns,
+                                           (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? (1u) : (0u));
                         } break;
 
                         default: {
@@ -842,7 +846,7 @@ static void perfed_setup(void) {
         //perf_attrs.use_clockid    = 1;
         perf_attrs.context_switch = 1;
         //perf_attrs.aux_output     = 1;
-        //perf_attrs.clockid        = CLOCK_MONOTONIC_RAW;
+        perf_attrs.clockid        = CLOCK_MONOTONIC_RAW;
         perf_attrs.aux_watermark    = ONE_MB;
 
         perfing_fd = syscall(SYS_perf_event_open,
