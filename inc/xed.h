@@ -107,6 +107,7 @@ extern void xed_intel_pt_tip_disable(const double                 tsc,
 extern void xed_tid_switch(const double       tsc,
                            const unsigned int sw_out);
 
+extern void xed_reset_call_stack(void);
 extern void xed_reset_last_inst(void);
 extern void xed_update_last_inst(const unsigned long long addr);
 extern void xed_process_branches(const unsigned int           tnt,

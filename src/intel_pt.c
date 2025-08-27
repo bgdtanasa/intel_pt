@@ -576,6 +576,8 @@ decode_again:
       last_ip = 0llu;
       last_psb++;
 
+      xed_reset_call_stack();
+
       record_intel_pt_pkt(INTEL_PT_PKT_PSB, 0llu, cyc_cnt_ref, x, n);
       x += 4llu;
       n -= 4llu;
@@ -608,6 +610,7 @@ decode_again:
         fprintf(stdout, " OVF BBP      = %20llx\n", 0llu);
       }
 
+      xed_reset_call_stack();
       xed_enable = 0u;
       xed_reset_last_inst();
 

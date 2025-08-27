@@ -22,7 +22,13 @@
 
 #define MAX_NO_DWARF_UNWINDS (5000000llu)
 #define MAX_NO_INSTS         (10000000llu)
+#define STACK_LEN            (1u * 256u)
+#define TNT_QUEUE_LEN        (1u * 1024u)
 #define TIP_QUEUE_LEN        (1u * 1024u)
+
+typedef struct {
+  unsigned long long int ret;
+} call_stack_t;
 
 typedef struct {
   unsigned int           tnt;
@@ -45,10 +51,12 @@ static unsigned long long  no_insts;
 static xed_chip_features_t chip_features;
 
 static unsigned int no_binaries;
-static char         binaries[ 50 ][ 250 ];
+static char         binaries[ 50u ][ 250u ];
 
 static signed long long last_inst = -1ll;
-static tnt_t            tnt_queue[ TIP_QUEUE_LEN ];
+static call_stack_t     call_stack[ STACK_LEN ];
+static unsigned int     call_stack_idx;
+static tnt_t            tnt_queue[ TNT_QUEUE_LEN ];
 static unsigned int     tnt_queue_head;
 static unsigned int     tnt_queue_tail;
 static tip_t            tip_queue[ TIP_QUEUE_LEN ];
@@ -532,6 +540,8 @@ void xed_intel_pt_tip_disable(const double                 tsc,
   }
 
   fprintf(branches_fp, "D :: %20.2lf\n", tsc);
+
+  xed_reset_call_stack();
 }
 
 void xed_tid_switch(const double       tsc,
@@ -542,6 +552,10 @@ void xed_tid_switch(const double       tsc,
   } else {
     fprintf(branches_fp, "X :: %20.2lf\n", tsc);
   }
+}
+
+void xed_reset_call_stack(void) {
+  call_stack_idx = 0u;
 }
 
 void xed_reset_last_inst(void) {
@@ -592,7 +606,7 @@ void xed_process_branches(const unsigned int           tnt,
   tip_t* x_tip = NULL;
 
   if (tnt_len >= 1u) {
-    const unsigned int tnt_queue_head_next = (tnt_queue_head + 1u) % TIP_QUEUE_LEN;
+    const unsigned int tnt_queue_head_next = (tnt_queue_head + 1u) % TNT_QUEUE_LEN;
 
     if (tnt_queue_head_next != tnt_queue_tail) {
       tnt_queue[ tnt_queue_head ] = (tnt_t) {
@@ -664,7 +678,7 @@ void xed_process_branches(const unsigned int           tnt,
       if (tnt_queue_tail != tnt_queue_head) {
         x_tnt = &tnt_queue[ tnt_queue_tail ];
         if (x_tnt->tnt_len == 0u) {
-          tnt_queue_tail = (tnt_queue_tail + 1u) % TIP_QUEUE_LEN;
+          tnt_queue_tail = (tnt_queue_tail + 1u) % TNT_QUEUE_LEN;
           if (tnt_queue_tail != tnt_queue_head) {
             x_tnt = &tnt_queue[ tnt_queue_tail ];
           } else {
@@ -707,6 +721,11 @@ void xed_process_branches(const unsigned int           tnt,
         }
       } else if ((insts[ last_inst ].cofi.type & UNCOND_DIRECT_BRANCH) != 0u) {
         if (insts[ last_inst ].category == XED_CATEGORY_CALL) {
+          call_stack[ call_stack_idx ] = (call_stack_t) {
+            .ret = insts[ last_inst + 1ll ].addr
+          };
+          call_stack_idx++;
+
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
           fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ last_inst ].cofi.u.c.addr);
 #endif
@@ -726,8 +745,30 @@ void xed_process_branches(const unsigned int           tnt,
           const double ipc = ((double) (branches_n - branches_n_en)) / ((double) (x_tip->cyc_cnt - branches_cyc_cnt_en));
 
           if (insts[ last_inst ].category == XED_CATEGORY_CALL) {
+            call_stack[ call_stack_idx ] = (call_stack_t) {
+              .ret = insts[ last_inst + 1ll ].addr
+            };
+            call_stack_idx++;
           } else if (insts[ last_inst ].category == XED_CATEGORY_UNCOND_BR) {
           } else if (insts[ last_inst ].category == XED_CATEGORY_RET) {
+            if (call_stack_idx >= 1u) {
+              const unsigned int call_stack_idx_next = call_stack_idx - 1u;
+
+              if (call_stack[ call_stack_idx_next ].ret != x_tip->tip) {
+                fflush(branches_fp);
+                fprintf(stderr,
+                      "%5s %10s :: %4u %16llx != %16llx :: %4u\n",
+                      xed_category_enum_t2str(insts[ last_inst ].category),
+                      xed_iclass_enum_t2str(insts[ last_inst ].iclass),
+                      call_stack_idx,
+                      call_stack[ call_stack_idx_next ].ret,
+                      x_tip->tip,
+                      call_stack_idx_next); for (;;) {}
+              }
+              call_stack_idx = call_stack_idx_next;
+            } else {
+              // What to do in this case?!
+            }
           } else {
             // What to do in this case?!
           }
@@ -743,6 +784,12 @@ void xed_process_branches(const unsigned int           tnt,
           return;
         }
       } else if ((insts[ last_inst ].cofi.type & FAR_TRANSFER) != 0u) {
+        if (insts[ last_inst ].category == XED_CATEGORY_CALL) {
+          fprintf(stdout, "FAR CALL\n"); for (;;) {}
+        } else if (insts[ last_inst ].category == XED_CATEGORY_RET) {
+          fprintf(stdout, "FAR RET\n"); for (;;) {}
+        }
+
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
         fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ last_inst + 1ll ].addr);
 #endif

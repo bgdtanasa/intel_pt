@@ -460,7 +460,9 @@ static void* perfing_main(void* args) {
 
         double aux_util     = 0.0f;
         double aux_util_max = 0.0f;
+#if defined(PRINT_RECORD)
         double switch_util  = 0.0f;
+#endif
 
         const __u64  data_size      = perf_metadata->data_size;
         __u64        data_tail      = __atomic_load_n(&perf_metadata->data_tail, __ATOMIC_ACQUIRE);
@@ -712,7 +714,9 @@ static void* perfing_main(void* args) {
                                 last_switch_out = switch_ref;
                                 switch_out      = 0llu;
                                 last_switch_in  = switch_ref;
+#if defined(PRINT_RECORD)
                                 switch_util     = 0.0f;
+#endif
                             } else {
                                 if (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) {
                                     switch_in       += switch_ref - last_switch_in;
@@ -721,7 +725,9 @@ static void* perfing_main(void* args) {
                                     switch_out      += switch_ref - last_switch_out;
                                     last_switch_in   = switch_ref;
                                 }
+#if defined(PRINT_RECORD)
                                 switch_util = ((double) (switch_in)) / ((double) (switch_in + switch_out));
+#endif
                             }
 
                             no_record_switch++;
