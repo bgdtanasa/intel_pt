@@ -48,10 +48,6 @@
 #define CYC_MASK       (0x03u)
 #define SHORT_TNT_MASK (0x01u)
 
-#if 1
-#define AUX_DBG
-#endif
-
 #define PRINT_FORMAT "%10s :: "
 #if 0
 #define PRINT_PT
@@ -103,10 +99,13 @@ typedef struct {
     unsigned long long int ip;  // INTEL_PT_PKT_FUP, INTEL_PT_PKT_TIP_PGE, INTEL_PT_PKT_TIP, INTEL_PT_PKT_TIP_PGD
   } v;
   unsigned long long int   cyc_cnt;
+  double                   tsc_approx;
 
+#if defined(AUX_DBG)
   const volatile unsigned char* x;
   unsigned char                 y;
   unsigned long long int        n;
+#endif
 } intel_pt_pkt_t;
 
 static const char*           intel_pt_pkt_names[ ] = {
@@ -160,6 +159,8 @@ static unsigned long long int bip_mem_aux_info;
 static unsigned long long int bip_mem_access_lat;
 static unsigned long long int bip_tsx_aux_info;
 static unsigned int           last_bep_fup;
+
+static unsigned int           last_ptw_fup;
 
 static double                 tsc_approx_ctc;
 static unsigned long long int tsc_approx_fc;
@@ -235,13 +236,14 @@ static inline __attribute__((always_inline)) unsigned int is_cyc_eligible(const 
           (type == INTEL_PT_PKT_SHORT_TNT)) ? (1u) : (0u);
 }
 
-static void print_intel_pt_pkt(void) {
+static void print_intel_pt_pkts(void) {
    for (unsigned int i = 1u; i < 48u; i++) {
     const unsigned int j = (INTEL_PT_PKT_HISTORY + intel_pt_pkt_hist_idx - i) % INTEL_PT_PKT_HISTORY;
 
     if (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_NONE) {
       return;
     } else {
+#if defined(AUX_DBG)
       fprintf(stdout,
               "%4u " PRINT_FORMAT "%16llx %20llu :: %16llx %02x %02x %12llu\n",
               j,
@@ -252,6 +254,14 @@ static void print_intel_pt_pkt(void) {
               ((unsigned int) (intel_pt_pkt_hist[ j ].y)),
               ((unsigned int) (*intel_pt_pkt_hist[ j ].x)),
               intel_pt_pkt_hist[ j ].n);
+#else
+      fprintf(stdout,
+              "%4u " PRINT_FORMAT "%16llx %20llu\n",
+              j,
+              intel_pt_pkt_names[ intel_pt_pkt_hist[ j ].type ],
+              intel_pt_pkt_hist[ j ].v.val,
+              intel_pt_pkt_hist[ j ].cyc_cnt);
+#endif
     }
   }
 }
@@ -272,8 +282,13 @@ static const intel_pt_pkt_t* prev_intel_pt_pkt(const intel_pt_pkt_type_t type) {
 static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
                                 unsigned long long int        val,
                                 const unsigned long long int  cyc_cnt,
+#if defined(AUX_DBG)
                                 const volatile unsigned char* x,
                                 unsigned long long int        n) {
+#else
+                                const volatile unsigned char* x __attribute__((unused)),
+                                unsigned long long int        n __attribute__((unused))) {
+#endif
   static const intel_pt_pkt_t* mtc_ref = NULL;
 
   const unsigned int a = is_cyc_eligible(type);
@@ -325,14 +340,17 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
   }
 
   intel_pt_pkt_hist[ intel_pt_pkt_hist_idx ] = (intel_pt_pkt_t) {
-    .type    = type,
-    .v       = {
-      .val   = val
+    .type       = type,
+    .v          = {
+      .val      = val
     },
-    .cyc_cnt = ((a == 1u) || (b == 1u)) ? (cyc_cnt) : (0llu),
-    .x       = x,
-    .y       = *x,
-    .n       = n
+    .cyc_cnt    = ((a == 1u) || (b == 1u)) ? (cyc_cnt) : (0llu),
+    .tsc_approx = ((a == 1u) || (b == 1u)) ? (tsc_approx_ref) : (0.0f),
+#if defined(AUX_DBG)
+    .x          = x,
+    .y          = *x,
+    .n          = n
+#endif
   };
   if (type == INTEL_PT_PKT_MTC) {
     mtc_ref = &intel_pt_pkt_hist[ intel_pt_pkt_hist_idx ];
@@ -344,7 +362,11 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
 
 static unsigned long long int ip_decode(const volatile unsigned char** x,
                                         unsigned long long int*        n,
+#if defined(AUX_DBG)
                                         const unsigned long long int   n_orig,
+#else
+                                        const unsigned long long int   n_orig __attribute__((unused)),
+#endif
                                         const intel_pt_pkt_type_t      pkt_type) {
   const volatile unsigned char* x_p = *x;
   unsigned long long int        n_p = *n;
@@ -467,7 +489,7 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
       xed_close();
 
       print_intel_pt_bytes(x_p, n_p, n_orig);
-      print_intel_pt_pkt();
+      print_intel_pt_pkts();
       fprintf(stderr, "ip_decode error :: ip_bytes = %u ip = %16llx last_ip = %16llx\n", ip_bytes, ip, last_ip); for (;;) { }
     }
 #endif
@@ -526,14 +548,21 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
 
 unsigned long long int intel_pt_decode(const volatile unsigned char*    x,
                                        unsigned long long int           n,
+#if defined(AUX_DBG)
                                        const unsigned long long int     h,
                                        volatile unsigned long long int* h_p) {
+#else
+                                       const unsigned long long int     h __attribute__((unused)),
+                                       volatile unsigned long long int* h_p __attribute__((unused))) {
+#endif
+#if defined(AUX_DBG)
   const volatile unsigned char* x_orig = x;
+#endif
   const unsigned long long int  n_orig = n;
 
-  volatile unsigned int*       x_32;
-  volatile unsigned short int* x_16;
-  volatile unsigned char*      x_8;
+  const volatile unsigned int*       x_32;
+  const volatile unsigned short int* x_16;
+  const volatile unsigned char*      x_8;
 
   //for (unsigned long long int i = 0llu; i < n; i++) {
   //  fprintf(stdout, "%02x ", ((unsigned int) (x[ i ])));
@@ -562,7 +591,7 @@ decode_again:
       xed_close();
 
       print_intel_pt_bytes(x, n, n_orig);
-      print_intel_pt_pkt();
+      print_intel_pt_pkts();
       fprintf(stderr, "0 intel_pt_decode error\n"); for (;;) { }
     }
 #endif
@@ -802,6 +831,8 @@ decode_again:
                                          (((unsigned long long int) (x[ 3u ])) <<  8llu) |
                                          (((unsigned long long int) (x[ 2u ])) <<  0llu);
 
+      last_ptw_fup = (((unsigned int) (x[ 1u ])) >> 7u) & 0x01u;
+
 #if defined(PRINT_PT)
       {
         const intel_pt_pkt_t* const  ptw_ref  = prev_intel_pt_pkt(INTEL_PT_PKT_PTW);
@@ -863,6 +894,10 @@ decode_again:
       const unsigned long long int fup = ip_decode(&x, &n, n_orig, INTEL_PT_PKT_FUP);
 
       if (last_bep_fup == 1u) {
+        if (last_ptw_fup == 1u) {
+          fprintf(stderr, "FUP BEP PTW error\n"); for (;;) { }
+        }
+
 #if defined(PRINT_PT)
         fprintf(stdout, "FUP BEP       = %20llx\n", fup);
 #endif
@@ -880,6 +915,15 @@ decode_again:
         bip_tsx_aux_info    = 0llu;
 
         last_bep_fup = 0u;
+      }
+      if (last_ptw_fup == 1u) {
+#if defined(PRINT_PT)
+        fprintf(stdout, "FUP PTW       = %20llx\n", fup);
+#endif
+
+        xed_intel_pt_ptw_fup(fup, last_intel_pt_pkt_b->tsc_approx, last_intel_pt_pkt_b->cyc_cnt);
+
+        last_ptw_fup = 0u;
       }
       goto decode_again;
     }
@@ -1013,7 +1057,7 @@ cyc_again:
     xed_close();
 
     print_intel_pt_bytes(x, n, n_orig);
-    print_intel_pt_pkt();
+    print_intel_pt_pkts();
     fprintf(stderr, "1 intel_pt_decode error\n"); for (;;) { }
   }
 

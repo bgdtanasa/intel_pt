@@ -101,6 +101,9 @@ extern void xed_intel_pt_bip_fup(const unsigned long long int a,
                                  const double                 tsc,
                                  const unsigned long long int pmu_mask,
                                  const unsigned long long int mem_addr);
+extern void xed_intel_pt_ptw_fup(const unsigned long long int ip,
+                                 const double                 tsc,
+                                 const unsigned long long int cyc_cnt);
 extern void xed_intel_pt_tip_disable(const double                 tsc,
                                      const unsigned long long int cyc_cnt);
 

@@ -527,6 +527,14 @@ void xed_intel_pt_bip_fup(const unsigned long long int a,
   pmu_info(pmu_mask, branches_fp);
 }
 
+void xed_intel_pt_ptw_fup(const unsigned long long int ip,
+                          const double                 tsc,
+                          const unsigned long long int cyc_cnt) {
+  (void) (cyc_cnt);
+
+  fprintf(branches_fp, "W :: %20.2lf %16llx\n", tsc, ip);
+}
+
 void xed_intel_pt_tip_disable(const double                 tsc,
                               const unsigned long long int cyc_cnt) {
   (void) (cyc_cnt);
