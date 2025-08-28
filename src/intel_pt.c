@@ -576,8 +576,6 @@ decode_again:
       last_ip = 0llu;
       last_psb++;
 
-      xed_reset_call_stack();
-
       record_intel_pt_pkt(INTEL_PT_PKT_PSB, 0llu, cyc_cnt_ref, x, n);
       x += 4llu;
       n -= 4llu;
@@ -637,7 +635,7 @@ decode_again:
     }
     if ((n >= 8llu) && (*x_16 == LONG_TNT)) {
 //#if defined(PRINT_PT)
-      fprintf(stdout, "LONG_TNT      = %20u\n", 0u);
+      fprintf(stdout, "LONG_TNT      = %20u\n", 0u); for (;;) { }
 //#endif
 
       record_intel_pt_pkt(INTEL_PT_PKT_LONG_TNT, 0llu, cyc_cnt_ref, x, n);
