@@ -7,14 +7,22 @@
 #include "xed-reg-enum.h"
 #include "xed-operand-enum.h"
 #include "xed-common-defs.h"
+#include "xed-flags.h"
+
+#include <sys/user.h>
 
 #define MAX_NO_REGS (17u)
 
-#if 0
+#if 1
 #define PRINT_XED
 #else
 #if 0
 #define PRINT_XED_BRANCHES_ONLY
+#endif
+#endif
+#if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
+#if 1
+#define PRINT_XED_OPCODE
 #endif
 #endif
 
@@ -80,7 +88,7 @@ typedef struct {
 
   cofi_t                 cofi;
 
-  dwarf_unwind_t*        unwind;
+  const dwarf_unwind_t*  unwind;
 } inst_t;
 
 extern dwarf_unwind_t* unwinds;
@@ -110,6 +118,9 @@ extern void xed_intel_pt_tip_disable(const double                 tsc,
 extern void xed_tid_switch(const double       tsc,
                            const unsigned int sw_out);
 
+extern void xed_ptrace_uregs(const double                         tsc,
+                             const struct user_regs_struct* const uregs);
+
 extern void xed_reset_call_stack(void);
 extern void xed_reset_last_inst(void);
 extern void xed_update_last_inst(const unsigned long long addr);
@@ -119,9 +130,9 @@ extern void xed_process_branches(const unsigned int           tnt,
                                  const double                 tsc,
                                  const unsigned long long int cyc_cnt);
 
-extern inst_t*         xed_unwind_find_inst(const unsigned long long int addr);
-extern dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr);
-extern void            xed_unwind_link_inst_and_dwarf(void);
+extern const inst_t*         xed_unwind_find_inst(const unsigned long long int addr);
+extern const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr);
+extern void                  xed_unwind_link_inst_and_dwarf(void);
 
 extern void xed_close(void);
 

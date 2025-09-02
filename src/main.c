@@ -32,8 +32,13 @@
 #include "kmod.h"
 #include "x_unwind.h"
 
-#if 0
+#if 1
+#define DO_PTRACE
+#endif
+#if defined(DO_PTRACE)
+#if 1
 #define DO_UNWIND
+#endif
 #endif
 #if 0
 #define PRINT_RECORD
@@ -173,7 +178,9 @@ static int   perfed_msr_fd;
 static int   perfing_cpu;
 static int   perfing_fd;
 
+#if defined(DO_PTRACE)
 static unsigned int          perfed_is_stopped;
+#endif
 static volatile unsigned int perfing_is_running;
 
 static struct perf_event_mmap_page* perf_metadata;
@@ -197,6 +204,23 @@ static __u64 switch_in;
 static __u64 switch_out;
 static __u64 last_switch_in;
 static __u64 last_switch_out;
+
+#if defined(DO_PTRACE)
+static unsigned long long int  ptrace_tsc;
+static struct user_regs_struct uregs;
+#endif
+
+static inline __attribute__((always_inline)) unsigned long long int read_tsc(void) {
+    unsigned int lo;
+    unsigned int hi;
+
+    asm volatile ("rdtsc" : "=a"(lo), "=d"(hi));
+#if 0
+    asm volatile ("mfence" : : : "memory");
+#endif
+
+    return (((unsigned long long int) (hi)) << 32llu) | (((unsigned long long int) (lo)) <<  0llu);
+}
 
 static void perfed_msr(void) {
     char fd_name[ 128u ];
@@ -492,31 +516,35 @@ static void* perfing_main(void* args) {
                 perfed_pid,
                 perfed_cpu);
 
-        // Stopping the perfed pid to load the kernel module.
+        (void) posix_memalign(((void**) (&data_buffer)), AUX_ALIGNMENT, DATA_BUFFER_SIZE * sizeof(__u8)); memset(data_buffer, 0x00, DATA_BUFFER_SIZE * sizeof(__u8));
+        (void) posix_memalign(((void**) (&aux_buffer)),  AUX_ALIGNMENT, AUX_BUFFER_SIZE * sizeof(__u8));  memset(aux_buffer,  0x00, AUX_BUFFER_SIZE * sizeof(__u8));
+        perf_record = ((perf_record_t*) (data_buffer));
+
+#if defined(DO_UNWIND)
+        // Load the kernel module by stopping the perfed pid
         {
             int status;
 
+            unwind_init(perfed_pid);
             if (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1) {
                 const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
 
                 if (perfed_pid_wait == perfed_pid) {
                     if (WIFSTOPPED(status)) {
+                        ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
+
                         kmod_load(perfed_pid);
                         ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
-
-                        unwind_init(perfed_pid);
                     }
                 } else {
                     fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
                 }
             }
         }
-
-        (void) posix_memalign(((void**) (&data_buffer)), AUX_ALIGNMENT, DATA_BUFFER_SIZE * sizeof(__u8)); memset(data_buffer, 0x00, DATA_BUFFER_SIZE * sizeof(__u8));
-        (void) posix_memalign(((void**) (&aux_buffer)),  AUX_ALIGNMENT, AUX_BUFFER_SIZE * sizeof(__u8));  memset(aux_buffer,  0x00, AUX_BUFFER_SIZE * sizeof(__u8));
-
-        perf_record = ((perf_record_t*) (data_buffer));
+#else
         ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
+#endif
+
         for (;;) {
 #if defined(PRINT_RECORD)
             clock_gettime(CLOCK_MONOTONIC, &a);
@@ -574,37 +602,41 @@ static void* perfing_main(void* args) {
                             if (aux_util > aux_util_max) {
                                 aux_util_max = aux_util;
                             }
-#if defined(DO_UNWIND)
-                            if ((aux_util >= 0.01f) && (perfed_is_stopped == 0u)) {
+#if defined(DO_PTRACE)
+                            if (perfed_is_stopped == 0u) {
                                 long ret;
                                 int  status;
 
                                 errno = 0;
                                 ret   = ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL);
                                 if (ret == -1l) {
-                                    fprintf(stderr, "PTRACE_ATTACH failed %s\n", strerror(errno));
+                                    fprintf(stderr, "PTRACE_ATTACH failed %s\n", strerror(errno)); for (;;) {}
                                 } else {
                                     const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
 
                                     if (perfed_pid_wait == perfed_pid) {
                                         if (WIFSTOPPED(status)) {
-                                            struct user_regs_struct regs = { 0 };
+                                            // Safe TSC read:
+                                            //  1. perfed_pid is stopped
+                                            //  2. TSC is synchronized across all CPU cores
+                                            ptrace_tsc = read_tsc();
+                                            perfed_is_stopped = 1u;
+                                            ioctl(perfing_fd, PERF_EVENT_IOC_DISABLE, 0);
 
                                             errno = 0;
-                                            ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &regs);
+                                            ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &uregs);
                                             if (ret == -1l) {
-                                                fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno));
+                                                fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno)); for (;;) {}
                                             } else {
-                                                unwind(perfed_pid, perfed_cpu, &regs);
+#if defined(DO_UNWIND)
+                                                unwind(perfed_pid, perfed_cpu, &uregs);
+#endif
                                             }
                                             errno = 0;
                                             ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
                                             if (ret == -1l) {
-                                                fprintf(stderr, "PTRACE_DETACH failed %s\n", strerror(errno));
+                                                fprintf(stderr, "PTRACE_DETACH failed %s\n", strerror(errno)); for (;;) {}
                                             }
-                                            perfed_is_stopped = 1u;
-                                            ioctl(perfing_fd, PERF_EVENT_IOC_DISABLE, 0);
-
 #if defined(PRINT_RECORD)
                                             clock_gettime(CLOCK_MONOTONIC, &b);
                                             ts_0 = ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec));
@@ -760,7 +792,9 @@ static void* perfing_main(void* args) {
                 fprintf(stdout, "record ts = %12lld ns\n", ts_1);
 #endif
             } else {
+#if defined(DO_PTRACE)
                 if (perfed_is_stopped == 1u) {
+                    xed_ptrace_uregs(((double) (ptrace_tsc)), &uregs);
                     perfed_is_stopped = 0u;
                     ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
 
@@ -770,6 +804,7 @@ static void* perfing_main(void* args) {
                     fprintf(stdout, "detach ts = %12lld ms\n", ts_2 / 1000ll / 1000ll);
 #endif
                 }
+#endif
             }
 
             if (perfing_is_running == 0u) {
@@ -799,9 +834,11 @@ static void* perfing_main(void* args) {
     }
     close(perfing_fd);
 
+#if defined(DO_UNWIND)
     unwind_close();
-    xed_close();
     kmod_unload();
+#endif
+    xed_close();
     free(data_buffer);
     free(aux_buffer);
     pthread_exit(NULL);
@@ -884,7 +921,6 @@ static void perfed_setup(void) {
                          perfing_fd,
                          perf_metadata->aux_offset);
                 if (p != MAP_FAILED) {
-#if 1
                     perfed_xed(perfed_pid);
                     perfed_proc(perfed_pid, NULL);
                     perfed_pmu(perfed_pid, perfed_cpu, perfing_fd);
@@ -898,7 +934,6 @@ static void perfed_setup(void) {
                     fprintf(stdout, "perf_metadata->aux_tail    = %10llu\n", perf_metadata->aux_tail);
                     fprintf(stdout, "perf_metadata->aux_offset  = %10llu MB\n", perf_metadata->aux_offset / ONE_MB);
                     fprintf(stdout, "perf_metadata->aux_size    = %10llu MB\n", perf_metadata->aux_size / ONE_MB);
-#endif
 
                     perf_data_buffer = &((__u8*) (perf_metadata))[ perf_metadata->data_offset ];
                     perf_aux_buffer  = ((__u8*) (p));
