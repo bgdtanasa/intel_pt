@@ -3,7 +3,7 @@ SOURCES=$(shell find $(SRC_DIR) -name "*.c")
 OBJECTS=$(SOURCES:%.c=%.o)
 DEPS=$(OBJECTS:%.o=%.d)
 TARGET=myperf
-XED_KIT=xed-install-base-2025-03-31-lin-x86-64
+XED_KIT=xed-install-base-2025-08-31-lin-x86-64
 
 INC_DIR=inc
 INC_SUBDIRS=$(shell find $(INC_DIR) -type d)
