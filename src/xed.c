@@ -104,16 +104,20 @@ static unsigned long long int read_perfed_vm(const int perfed_pid, const unsigne
 }
 #endif
 
-static char* get_binary(const char* const xed_file) {
+const char* parse_get_binary(const char* const xed_file, const unsigned int add_file) {
   for (unsigned int i = 0u; i < no_binaries; i++) {
     if (strcmp(binaries[ i ], xed_file) == 0) {
       return &binaries[ i ][ 0u ];
     }
   }
-  strcpy(&binaries[ no_binaries ][ 0u ], xed_file);
-  no_binaries++;
+  if (add_file == 1u) {
+    strcpy(&binaries[ no_binaries ][ 0u ], xed_file);
+    no_binaries++;
 
-  return &binaries[ no_binaries - 1u ][ 0u ];
+    return &binaries[ no_binaries - 1u ][ 0u ];
+  } else {
+    return NULL;
+  }
 }
 
 void parse_dwarf(const char* const xed_file, const unsigned long long int base_addr) {
@@ -135,13 +139,9 @@ void parse_dwarf(const char* const xed_file, const unsigned long long int base_a
 
   FILE* const fp = fopen(dwarf_file, "r");
   if (fp != NULL) {
-#define MAX_BUFFER_SZ (256u)
-    char buffer_0[ MAX_BUFFER_SZ ];
-    char buffer_1[ MAX_BUFFER_SZ ];
+    char buffer_0[ MAX_DWARF_LINE ];
+    char buffer_1[ MAX_DWARF_LINE ];
 
-#if 0
-    fprintf(stdout, "\n");
-#endif
     for (;;) {
       unsigned long long int addr           = 0llu;
       unsigned int           cfa_reg        = 0u;
@@ -159,41 +159,72 @@ void parse_dwarf(const char* const xed_file, const unsigned long long int base_a
         int n = sscanf(a, "  0x%llx: CFA=R%u+%d: %[^\n]", &addr, &cfa_reg, &cfa_reg_offset, b);
 
         if (n != 4) {
-          continue;
+          n = sscanf(a, "  0x%llx: CFA=R%u: %[^\n]", &addr, &cfa_reg, b);
+          if (n != 3) {
+            n = sscanf(a, "  0x%llx: CFA=DW_OP_%[^\n]", &addr, b);
+            if (n == 2) {
+              unwinds[ no_unwinds ].base_addr = base_addr;
+              unwinds[ no_unwinds ].addr      = base_addr + addr;
+              unwinds[ no_unwinds ].cfa.rule  = CFA_RULE_EXP;
+              strcpy(b, parse_dwarf_exp(b, ':', 2, &unwinds[ no_unwinds ].cfa.s.exp));
+            } else {
+              fprintf(stderr, "0 dwarf_cfa_err\n"); for (;;) {}
+            }
+          } else {
+            unwinds[ no_unwinds ].base_addr        = base_addr;
+            unwinds[ no_unwinds ].addr             = base_addr + addr;
+            unwinds[ no_unwinds ].cfa.rule         = CFA_RULE_REG;
+            unwinds[ no_unwinds ].cfa.s.reg        = cfa_reg;
+            unwinds[ no_unwinds ].cfa.s.reg_offset = 0;
+          }
+        } else {
+          unwinds[ no_unwinds ].base_addr        = base_addr;
+          unwinds[ no_unwinds ].addr             = base_addr + addr;
+          unwinds[ no_unwinds ].cfa.rule         = CFA_RULE_REG;
+          unwinds[ no_unwinds ].cfa.s.reg        = cfa_reg;
+          unwinds[ no_unwinds ].cfa.s.reg_offset = cfa_reg_offset;
         }
         c = a; a = b; b = c; b[ 0u ] = '\0';
 
         memset(&regs[ 0u ], 0, sizeof(regs));
 reg_again:
-        n = sscanf(a, "R%u=[CFA%d]%[^\n]", &reg_idx, &reg_idx_cfa, b);
-        if ((n == 3) || ((n == 2) && (b[ 0u ] == '\0'))) {
+        n = sscanf(a, "R%u=[DW_OP_%[^\n]", &reg_idx, b);
+        if (n == 2) {
           regs[ reg_idx ] = (dwarf_reg_t) {
-            .rule  = REG_RULE_CFA,
-            .u     = {
-              .cfa = reg_idx_cfa
-            }
+            .rule  = REG_RULE_EXP
           };
-        } else if (n <= 2) {
-          n = sscanf(a, "R%u=R%u%[^\n]", &reg_idx, &reg_idx_reg, b);
+          strcpy(b, parse_dwarf_exp(b, ']', 1, &regs[ reg_idx ].exp));
+        } else {
+          n = sscanf(a, "R%u=[CFA%d]%[^\n]", &reg_idx, &reg_idx_cfa, b);
           if ((n == 3) || ((n == 2) && (b[ 0u ] == '\0'))) {
             regs[ reg_idx ] = (dwarf_reg_t) {
-              .rule  = REG_RULE_REG,
+              .rule  = REG_RULE_CFA,
               .u     = {
-                .reg = reg_idx_reg
+                .cfa = reg_idx_cfa
               }
             };
-          } else if (n <= 1) {
-            n = sscanf(a, "R%u=X%[^\n]", &reg_idx, b);
-            if ((n == 2) || ((n == 1) && (b[ 0u ] == '\0'))) {
+          } else if (n <= 2) {
+            n = sscanf(a, "R%u=R%u%[^\n]", &reg_idx, &reg_idx_reg, b);
+            if ((n == 3) || ((n == 2) && (b[ 0u ] == '\0'))) {
               regs[ reg_idx ] = (dwarf_reg_t) {
-                .rule  = REG_RULE_UNDEFINED
+                .rule  = REG_RULE_REG,
+                .u     = {
+                  .reg = reg_idx_reg
+                }
               };
-            } else {
-              continue;
+            } else if (n <= 1) {
+              n = sscanf(a, "R%u=X%[^\n]", &reg_idx, b);
+              if ((n == 2) || ((n == 1) && (b[ 0u ] == '\0'))) {
+                regs[ reg_idx ] = (dwarf_reg_t) {
+                  .rule  = REG_RULE_UNDEFINED
+                };
+              } else {
+                fprintf(stderr, "0 dwarf_reg_err\n"); for (;;) {}
+              }
             }
+          } else {
+            fprintf(stderr, "1 dwarf_reg_err\n"); for (;;) {}
           }
-        } else {
-          continue;
         }
         c = a; a = b; b = c; b[ 0u ] = '\0';
         if (a[ 0u ] == ',') {
@@ -204,28 +235,8 @@ reg_again:
         if (no_unwinds >= MAX_NO_DWARF_UNWINDS) {
           fprintf(stderr, "Not enough space to load the unwinds\n"); for (;;) {}
         }
-        unwinds[ no_unwinds ].base_addr      = base_addr;
-        unwinds[ no_unwinds ].addr           = base_addr + addr;
-        unwinds[ no_unwinds ].cfa_reg        = cfa_reg;
-        unwinds[ no_unwinds ].cfa_reg_offset = cfa_reg_offset;
         memcpy(&unwinds[ no_unwinds ].regs[ 0u ], &regs[ 0u ], sizeof(regs));
         no_unwinds++;
-
-#if 0
-        fprintf(stdout, "%016llx %02u %5d :: ", base_addr + addr, cfa_reg, cfa_reg_offset);
-        for (unsigned int i = 0u; i < MAX_NO_REGS; i++) {
-          if (regs[ i ].rule == REG_RULE_CFA) {
-            fprintf(stdout, "%5d ", regs[ i ].u.cfa);
-          } else if (regs[ i ].rule == REG_RULE_REG) {
-            fprintf(stdout, "%5u ", regs[ i ].u.reg);
-          } else if (regs[ i ].rule == REG_RULE_UNDEFINED) {
-            fprintf(stdout, "%5s ", "x");
-          } else {
-            fprintf(stdout, "%5s ", "none");
-          }
-        }
-        fprintf(stdout, "%s\n", a);
-#endif
       } else {
         break;
       }
@@ -333,7 +344,7 @@ xed_decode_inst:
               fprintf(stderr, "Not enough space to load the instructions\n"); for (;;) {}
             }
             memset(&insts[ no_insts ], 0, sizeof(inst_t));
-            insts[ no_insts ].binary    = get_binary(xed_file);
+            insts[ no_insts ].binary    = parse_get_binary(xed_file, 1u);
             insts[ no_insts ].base_addr = base_addr;
             insts[ no_insts ].addr      = addr;
             insts[ no_insts ].category  = xedd_category;
@@ -458,11 +469,13 @@ xed_decode_inst:
         //} else if (xed_error == XED_ERROR_INSTR_TOO_LONG) {
         // ?!?!
         } else {
+#if 0
           fprintf(stderr, "%016llx %3d :: %2u :: ", addr - base_addr, xed_error, n_bytes);
           for (unsigned int i = 0u; i < n_bytes; i++) {
             fprintf(stderr, "%02x ", inst_bytes[ i ]);
           }
           fprintf(stderr, "\n");
+#endif
         }
       } else {
         break;
@@ -628,6 +641,13 @@ void xed_ptrace_uregs(const double                         tsc,
             tnt = ((cf == 1llu) || (zf == 1llu)) ? (1u) : (0u);
           } break;
 
+          case XED_ICLASS_JL: {
+            const unsigned long long int sf = SF(uregs->eflags);
+            const unsigned long long int of = OF(uregs->eflags);
+
+            tnt = (sf != of) ? (1u) : (0u);
+          } break;
+
           case XED_ICLASS_JLE: {
             const unsigned long long int zf = ZF(uregs->eflags);
             const unsigned long long int sf = SF(uregs->eflags);
@@ -649,10 +669,43 @@ void xed_ptrace_uregs(const double                         tsc,
             tnt = ((cf == 0llu) && (zf == 0llu)) ? (1u) : (0u);
           } break;
 
+          case XED_ICLASS_JNL: {
+            const unsigned long long int sf = SF(uregs->eflags);
+            const unsigned long long int of = OF(uregs->eflags);
+
+            tnt = (sf == of) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JNLE: {
+            const unsigned long long int zf = ZF(uregs->eflags);
+            const unsigned long long int sf = SF(uregs->eflags);
+            const unsigned long long int of = OF(uregs->eflags);
+
+            tnt = ((zf == 0llu) && (sf == of)) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JNP: {
+            const unsigned long long int pf = PF(uregs->eflags);
+
+            tnt = (pf == 0llu) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JNS: {
+            const unsigned long long int sf = SF(uregs->eflags);
+
+            tnt = (sf == 0llu) ? (1u) : (0u);
+          } break;
+
           case XED_ICLASS_JNZ: {
             const unsigned long long int zf = ZF(uregs->eflags);
 
             tnt = (zf == 0llu) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JP: {
+            const unsigned long long int pf = PF(uregs->eflags);
+
+            tnt = (pf == 1llu) ? (1u) : (0u);
           } break;
 
           case XED_ICLASS_JS: {

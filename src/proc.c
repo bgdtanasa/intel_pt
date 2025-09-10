@@ -110,9 +110,15 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
                         line++;
                     }
                     line[ strlen(line) - 1 ] = '\0';
-                    fprintf(stdout, "%32s %08x :: ", basename(line), o);
-                    parse_dwarf(basename(line), a - o);
-                    parse_objdump(perfed_pid, basename(line), a - o);
+                    {
+                        const char* const binary = basename(line);
+
+                        if (parse_get_binary(binary, 0u) == NULL) {
+                            fprintf(stdout, "%32s %08x :: ", binary, o);
+                            parse_dwarf(binary, a - o);
+                            parse_objdump(perfed_pid, binary, a - o);
+                        }
+                    }
                 }
                 if (regs != NULL) {
                     if ((a <= regs->rsp) && (regs->rsp <= b)) {

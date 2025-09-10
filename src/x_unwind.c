@@ -25,7 +25,7 @@ static inline __attribute__((always_inline)) unsigned long long read_tsc(void) {
            (((unsigned long long) (lo)) <<  0llu);
 }
 
-void unwind_init(const int perfed_pid) {
+void perfed_unwind(const int perfed_pid) {
   unwind_fp = fopen("unwind.log", "w");
   if (unwind_fp == NULL) {
     unwind_fp = stdout;
@@ -41,13 +41,6 @@ void unwind_init(const int perfed_pid) {
 
       fclose(fp);
     }
-  }
-}
-
-void unwind_close(void) {
-  if ((unwind_fp != NULL) && (unwind_fp != stdout)) {
-    fflush(unwind_fp);
-    fclose(unwind_fp);
   }
 }
 
@@ -88,7 +81,8 @@ void unwind(const int                            perfed_pid,
 unwind_again:
   inst   = xed_unwind_find_inst(cfa_regs[ 16u ]);
   if (inst == NULL) {
-    fprintf(stdout, "Instruction %016llx not found\n", cfa_regs[ 16u ]); for (;;) {}
+    unwind_close();
+    fprintf(stderr, "Instruction %16llx not found\n", cfa_regs[ 16u ]); for (;;) {}
   }
   unwind = (inst != NULL) ? (inst->unwind) : (NULL);
   if (unwind != NULL) {
@@ -101,7 +95,13 @@ unwind_again:
             unwind->addr - unwind->base_addr);
 
     // computing cfa
-    cfa = cfa_regs[ unwind->cfa_reg ] + unwind->cfa_reg_offset;
+    if (unwind->cfa.rule == CFA_RULE_REG) {
+      cfa = cfa_regs[ unwind->cfa.s.reg ] + unwind->cfa.s.reg_offset;
+    } else if (unwind->cfa.rule == CFA_RULE_EXP) {
+      cfa = execute_dwarf_cfa_exp(unwind->cfa.s.exp, cfa_regs);
+    } else {
+      fprintf(stdout, "Cfa default for instruction %16llx\n", unwind->addr); for (;;) {}
+    }
     // updating cfa_regs
     for (unsigned int i = 0u; i <= 16u; i++) {
       switch (unwind->regs[ i ].rule) {
@@ -126,12 +126,12 @@ unwind_again:
         } break;
 
         case REG_RULE_EXP: {
-          fprintf(stdout, "Reg %2u REG_RULE_EXP\n", i); for (;;) {}
+          cfa_regs[ i ] = execute_dwarf_reg_exp(unwind->regs[ i ].exp, cfa_regs);
         } break;
 
-        case REG_RULE_UNDEFINED:
+        case REG_RULE_UNDEFINED: {
           goto unwind_done;
-        break;
+        } break;
 
         default: {
           fprintf(stdout, "Reg %2u default[%d]\n", i, unwind->regs[ i ].rule); for (;;) {}
@@ -149,4 +149,11 @@ unwind_done:
           "unwind ts = %12lld ns\n",
           ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec)));
   fprintf(unwind_fp, "\n");
+}
+
+void unwind_close(void) {
+  if ((unwind_fp != NULL) && (unwind_fp != stdout)) {
+    fflush(unwind_fp);
+    fclose(unwind_fp);
+  }
 }

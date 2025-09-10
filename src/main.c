@@ -525,7 +525,7 @@ static void* perfing_main(void* args) {
         {
             int status;
 
-            unwind_init(perfed_pid);
+            perfed_unwind(perfed_pid);
             if (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1) {
                 const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
 

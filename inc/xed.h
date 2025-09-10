@@ -9,9 +9,9 @@
 #include "xed-common-defs.h"
 #include "xed-flags.h"
 
-#include <sys/user.h>
+#include "x_dwarf.h"
 
-#define MAX_NO_REGS (17u)
+#include <sys/user.h>
 
 #if 1
 #define PRINT_XED
@@ -32,6 +32,21 @@
 #define FAR_TRANSFER         (1u << 3u)
 
 typedef enum {
+  CFA_RULE_NONE,
+  CFA_RULE_REG,
+  CFA_RULE_EXP
+} dwarf_cfa_rule_t;
+
+typedef struct {
+  dwarf_cfa_rule_t rule;
+  struct {
+    unsigned int reg;
+    signed int   reg_offset;
+    void*        exp;
+  } s;
+} dwarf_cfa_t;
+
+typedef enum {
   REG_RULE_NONE,
   REG_RULE_CFA,
   REG_RULE_REG,
@@ -45,13 +60,13 @@ typedef struct {
     signed int   cfa;
     unsigned int reg;
   } u;
+  void* exp;
 } dwarf_reg_t;
 
 typedef struct {
   unsigned long long int base_addr;
   unsigned long long int addr;
-  unsigned char          cfa_reg;
-  signed int             cfa_reg_offset;
+  dwarf_cfa_t            cfa;
   dwarf_reg_t            regs[ MAX_NO_REGS ];
 } dwarf_unwind_t;
 
@@ -78,7 +93,7 @@ typedef struct {
 } cofi_t;
 
 typedef struct {
-  char*                  binary;
+  const char*            binary;
   unsigned long long int base_addr;
   unsigned long long int addr;
   xed_category_enum_t    category;
@@ -94,8 +109,10 @@ typedef struct {
 extern dwarf_unwind_t* unwinds;
 extern inst_t*         insts;
 
-extern void parse_dwarf(const char* const xed_file, const unsigned long long int base_addr);
-extern void parse_objdump(const int perfed_pid, const char* const xed_file, const unsigned long long int base_addr);
+extern const char* parse_get_binary(const char* const xed_file, const unsigned int add_file);
+extern void        parse_dwarf(const char* const xed_file, const unsigned long long int base_addr);
+extern void        parse_objdump(const int perfed_pid, const char* const xed_file, const unsigned long long int base_addr);
+
 extern void perfed_xed(const int perfed_pid);
 
 extern void xed_intel_pt_ovf_fup(const unsigned long long int ip,
