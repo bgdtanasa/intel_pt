@@ -29,6 +29,7 @@
 
 #define MAX_NO_DWARF_UNWINDS (5000000llu)
 #define MAX_NO_INSTS         (10000000llu)
+#define MAX_NO_BINARIES      (250u)
 #define STACK_LEN            (1u * 256u)
 #define TNT_QUEUE_LEN        (1u * 1024u)
 #define TIP_QUEUE_LEN        (1u * 1024u)
@@ -58,7 +59,7 @@ static unsigned long long  no_insts;
 static xed_chip_features_t chip_features;
 
 static unsigned int no_binaries;
-static char         binaries[ 50u ][ 250u ];
+static char         binaries[ MAX_NO_BINARIES ][ 250u ];
 
 static signed long long last_inst = -1ll;
 static call_stack_t     call_stack[ STACK_LEN ];
@@ -113,6 +114,9 @@ const char* parse_get_binary(const char* const xed_file, const unsigned int add_
   if (add_file == 1u) {
     strcpy(&binaries[ no_binaries ][ 0u ], xed_file);
     no_binaries++;
+    if (no_binaries >= MAX_NO_BINARIES) {
+      fprintf(stderr, "Not enough space to load the binaries\n"); for (;;) {}
+    }
 
     return &binaries[ no_binaries - 1u ][ 0u ];
   } else {
@@ -219,7 +223,12 @@ reg_again:
                   .rule  = REG_RULE_UNDEFINED
                 };
               } else {
-                fprintf(stderr, "0 dwarf_reg_err\n"); for (;;) {}
+                n = sscanf(a, "XMM%u=[CFA%d]%[^\n]", &reg_idx, &reg_idx_cfa, b);
+                if ((n == 3) || ((n == 2) && (b[ 0u ] == '\0'))) {
+                  // Ignore XMM registers for the moment
+                } else {
+                  fprintf(stderr, "0 dwarf_reg_err\n"); for (;;) {}
+                }
               }
             }
           } else {
