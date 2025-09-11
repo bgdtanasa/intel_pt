@@ -82,7 +82,7 @@ unwind_again:
   inst   = xed_unwind_find_inst(cfa_regs[ 16u ]);
   if (inst == NULL) {
     unwind_close();
-    fprintf(stderr, "Instruction %16llx not found\n", cfa_regs[ 16u ]); for (;;) {}
+    fprintf(stderr, "UNWIND Instruction %16llx not found\n", cfa_regs[ 16u ]); for (;;) {}
   }
   unwind = (inst != NULL) ? (inst->unwind) : (NULL);
   if (unwind != NULL) {

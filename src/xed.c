@@ -28,7 +28,7 @@
 #define OF(eflags) ((eflags >> 11llu) & 0x01llu)
 
 #define MAX_NO_DWARF_UNWINDS (5000000llu)
-#define MAX_NO_INSTS         (10000000llu)
+#define MAX_NO_INSTS         (20000000llu)
 #define MAX_NO_BINARIES      (250u)
 #define STACK_LEN            (1u * 256u)
 #define TNT_QUEUE_LEN        (1u * 1024u)
@@ -774,7 +774,7 @@ void xed_update_last_inst(const unsigned long long addr) {
     last_inst = -1ll;
 
     xed_close();
-    fprintf(stderr, "Instruction %16llx not found\n", addr); for (;;) {}
+    fprintf(stderr, "XED Instruction %16llx not found\n", addr); for (;;) {}
   }
 }
 

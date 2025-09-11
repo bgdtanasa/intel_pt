@@ -1,5 +1,6 @@
 #include "proc.h"
 #include "xed.h"
+#include "x_elf.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -11,7 +12,7 @@
 
 #include <linux/kernel-page-flags.h>
 
-static char buffer[ 256u ];
+static char buffer[ 512u ];
 
 static void parse_pagemap(const int                    perfed_pid,
                           unsigned long long int       vaddr_a,
@@ -102,7 +103,7 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
                        &x,
                        &p,
                        &o);
-                if ((x == 'x') || (strstr(line, "stack") != NULL)) {
+                if (((w == '-') && (x == 'x')) || (strstr(line, "stack") != NULL)) {
                     while ((line[ 0u ] != '/') && (line[ 0u ] != '[')) {
                         if (line[ 0u ] == '\n') {
                             break;
@@ -113,10 +114,17 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
                     {
                         const char* const binary = basename(line);
 
+                        if ((binary == NULL) || (strlen(binary) == 0)) {
+                            fprintf(stderr, "Invalid binary %16llx - %16llx %s", a, b, line); for (;;) {}
+                        }
+
                         if (parse_get_binary(binary, 0u) == NULL) {
-                            fprintf(stdout, "%32s %08x :: ", binary, o);
-                            parse_dwarf(binary, a - o);
-                            parse_objdump(perfed_pid, binary, a - o);
+                            const unsigned int           is_pie    = binary_is_pie(line);
+                            const unsigned long long int base_addr = (is_pie == 1u) ? (a - o) : (0llu);
+
+                            fprintf(stdout, "%64s %08x %u :: ", binary, o, is_pie);
+                            parse_dwarf(binary, base_addr);
+                            parse_objdump(perfed_pid, binary, base_addr);
                         }
                     }
                 }
