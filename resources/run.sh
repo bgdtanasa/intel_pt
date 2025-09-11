@@ -37,12 +37,24 @@ L=$(ldd $1 | awk '{ if ($0 ~ /vdso/) {
                     }
                   }')
 
+U=$(grep "r-xp" /proc/$(pgrep -o -x $1)/maps | awk '{print $6}')
+
 objdump -d $1 | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.$1
 llvm-dwarfdump --debug-frame $1 | grep "  0x" | sort -k 1 -g  > dwarf.$1
 my_sed dwarf.$1
-for l in $L;
+for l in $U;
 do
     a=$(basename $l)
+    if [[ $a = $1 ]];
+    then
+      echo "Skipping $a"
+      continue
+    fi
+    if [[ $a = "[vdso]" ]];
+    then
+      echo "Skipping $a"
+      continue
+    fi
 
     objdump -d $l | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.$a
     llvm-dwarfdump --debug-frame $l | grep "  0x" | sort -k 1 -g > dwarf.$a

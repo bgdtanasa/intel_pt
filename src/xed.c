@@ -1077,6 +1077,16 @@ void xed_unwind_link_inst_and_dwarf(void) {
 }
 
 void xed_close(void) {
+  for (unsigned int i = 0u; i < no_unwinds; i++) {
+    if (unwinds[ i ].cfa.rule == CFA_RULE_EXP) {
+      free(unwinds[ i ].cfa.s.exp);
+    }
+    for (unsigned j = 0u; j < MAX_NO_REGS; j++) {
+      if (unwinds[ i ].regs[ j ].rule == REG_RULE_EXP) {
+        free(unwinds[ i ].regs[ j ].exp);
+      }
+    }
+  }
   free(unwinds);
   free(insts);
 

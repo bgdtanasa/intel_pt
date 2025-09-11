@@ -128,6 +128,9 @@ exp_again:
     }
   }
   dwarf_stk->no_ops++;
+  if (dwarf_stk->no_ops >= MAX_DWARF_STK) {
+    fprintf(stderr, "Not enough space to load the dwarf stack\n"); for (;;) {}
+  }
 
   if (b[ 0u ] == ',') {
     b += 2;
