@@ -161,6 +161,19 @@ unsigned long long int execute_dwarf_cfa_exp(const void* const      exp,
 
   for (unsigned int i = 0u; i < dwarf_stk->no_ops; i++) {
     switch (dwarf_stk->ops[ i ].type) {
+      case X_DWARF_AND: {
+        if (stk_idx >= 2u) {
+          const unsigned long int a = stk[ stk_idx - 1u ];
+          const unsigned long int b = stk[ stk_idx - 2u ];
+
+          stk_idx -= 2u;
+          stk[ stk_idx ] = a & b;
+          stk_idx++;
+        } else {
+          fprintf(stderr, "X_DWARF_AND broken stack\n"); for (;;) {}
+        }
+      } break;
+
       case X_DWARF_BREG: {
         stk[ stk_idx ] = cfa_regs[ dwarf_stk->ops[ i ].op1 ] + dwarf_stk->ops[ i ].op2;
         stk_idx++;
@@ -177,6 +190,60 @@ unsigned long long int execute_dwarf_cfa_exp(const void* const      exp,
           }
         } else {
           fprintf(stderr, "X_DWARF_DEREF broken stack\n"); for (;;) {}
+        }
+      } break;
+
+      case X_DWARF_GE: {
+        if (stk_idx >= 2u) {
+          const unsigned long int a = stk[ stk_idx - 1u ];
+          const unsigned long int b = stk[ stk_idx - 2u ];
+
+          stk_idx -= 2u;
+          stk[ stk_idx ] = (b >= a) ? (1llu) : (0llu);
+          stk_idx++;
+        } else {
+          fprintf(stderr, "X_DWARF_GE broken stack\n"); for (;;) {}
+        }
+      } break;
+
+      case X_DWARF_LIT: {
+        stk[ stk_idx ] = dwarf_stk->ops[ i ].op1;
+        stk_idx++;
+      } break;
+
+      case X_DWARF_PLUS_UCONST: {
+        if (stk_idx >= 1u) {
+          stk_idx--;
+          stk[ stk_idx ] += dwarf_stk->ops[ i ].op1;
+          stk_idx++;
+        } else {
+          fprintf(stderr, "X_DWARF_PLUS_UCONST broken stack\n"); for (;;) {}
+        }
+      } break;
+
+      case X_DWARF_PLUS: {
+        if (stk_idx >= 2u) {
+          const unsigned long int a = stk[ stk_idx - 1u ];
+          const unsigned long int b = stk[ stk_idx - 2u ];
+
+          stk_idx -= 2u;
+          stk[ stk_idx ] = a + b;
+          stk_idx++;
+        } else {
+          fprintf(stderr, "X_DWARF_PLUS broken stack\n"); for (;;) {}
+        }
+      } break;
+
+      case X_DWARF_SHL: {
+        if (stk_idx >= 2u) {
+          const unsigned long int a = stk[ stk_idx - 1u ];
+          const unsigned long int b = stk[ stk_idx - 2u ];
+
+          stk_idx -= 2u;
+          stk[ stk_idx ] = b << a;
+          stk_idx++;
+        } else {
+          fprintf(stderr, "X_DWARF_SHL broken stack\n"); for (;;) {}
         }
       } break;
 
