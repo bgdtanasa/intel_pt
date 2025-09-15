@@ -50,8 +50,10 @@ void unwind(const int                            perfed_pid,
   unsigned long long int cfa;
   const inst_t*          inst;
   const dwarf_unwind_t*  unwind;
+#if 0
   struct timespec        a;
   struct timespec        b;
+#endif
 
   cfa_regs[  0u ] = ((unsigned long long int) (regs->rax));
   cfa_regs[  1u ] = ((unsigned long long int) (regs->rdx));
@@ -77,7 +79,9 @@ void unwind(const int                            perfed_pid,
           perfed_pid,
           perfed_cpu,
           ((double) (read_tsc()) / ((double) (tsc_hz))));
+#if 0
   clock_gettime(CLOCK_MONOTONIC, &a);
+#endif
 unwind_again:
   inst   = xed_unwind_find_inst(cfa_regs[ 16u ]);
   if (inst == NULL) {
@@ -117,7 +121,14 @@ unwind_again:
           if ((perfed_vma_a <= x) && (x < perfed_vma_b)) {
             cfa_regs[ i ] = *((unsigned long long int*) (perfing_vma_a + x - perfed_vma_a));
           } else  {
-            fprintf(stdout, "Reg %2u outside range :: %016llx\n", i, x); for (;;) {}
+            unwind_close();
+            fprintf(stdout,
+                    "Reg %2u outside range :: %16llx :: %s %16llx %16llx\n",
+                    i,
+                    x,
+                    inst->binary,
+                    inst->addr - inst->base_addr,
+                    unwind->addr - unwind->base_addr); for (;;) {}
           }
         } break;
 
@@ -144,10 +155,12 @@ unwind_again:
     goto unwind_again;
   }
 unwind_done:
+#if 0
   clock_gettime(CLOCK_MONOTONIC, &b);
   fprintf(stdout,
           "unwind ts = %12lld ns\n",
           ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec)));
+#endif
   fprintf(unwind_fp, "\n");
 }
 

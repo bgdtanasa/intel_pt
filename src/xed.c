@@ -28,7 +28,7 @@
 #define OF(eflags) ((eflags >> 11llu) & 0x01llu)
 
 #define MAX_NO_DWARF_UNWINDS (5000000llu)
-#define MAX_NO_INSTS         (20000000llu)
+#define MAX_NO_INSTS         (50000000llu)
 #define MAX_NO_BINARIES      (250u)
 #define STACK_LEN            (1u * 256u)
 #define TNT_QUEUE_LEN        (1u * 1024u)
@@ -711,6 +711,12 @@ void xed_ptrace_uregs(const double                         tsc,
             tnt = (zf == 0llu) ? (1u) : (0u);
           } break;
 
+          case XED_ICLASS_JO: {
+            const unsigned long long int of = OF(uregs->eflags);
+
+            tnt = (of == 1llu) ? (1u) : (0u);
+          } break;
+
           case XED_ICLASS_JP: {
             const unsigned long long int pf = PF(uregs->eflags);
 
@@ -1021,7 +1027,7 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
   while (a <= b) {
     m = (a + b) / 2ll;
 
-    if (insts[ m ].addr == addr) {
+    if ((insts[ m ].addr <= addr) && (addr <= insts[ m ].addr + insts[ m ].length - 1llu)) {
       return &insts[ m ];
     } else if (insts[ m ].addr < addr) {
       a = m + 1ll;
