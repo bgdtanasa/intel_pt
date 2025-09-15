@@ -144,6 +144,32 @@ typedef struct {
 } perf_record_lost_t;
 
 typedef struct {
+    __u32 pid;
+    __u32 tid;
+    __u64 addr;
+    __u64 len;
+    __u64 pgoff;
+    union {
+        struct {
+            __u32 maj;
+            __u32 min;
+            __u64 ino;
+            __u64 ino_generation;
+        } s_1;
+        struct {
+            __u8 build_id_size;
+            __u8 __reserved_1;
+            __u8 __reserved_2;
+            __u8 build[ 20u ];
+        } s_2;
+    } u;
+    __u32       prot;
+    __u32       flags;
+    char        filename[ 0u ];
+    sample_id_t id;
+} perf_record_mmap2_t;
+
+typedef struct {
     __u64       aux_offset;
     __u64       aux_size;
     __u64       flags;
@@ -166,6 +192,7 @@ typedef struct {
 
 typedef union {
     perf_record_lost_t         record_lost;
+    perf_record_mmap2_t        record_mmap2;
     perf_record_aux_t          record_aux;
     perf_record_itrace_start_t record_itrace_start;
     perf_record_lost_samples_t record_lost_samples;
@@ -578,6 +605,10 @@ static void* perfing_main(void* args) {
                                     no_record_lost);
                         } break;
 
+                        case PERF_RECORD_MMAP2: {
+                            fprintf(stdout, "new mmap %s\n", perf_record->record_mmap2.filename);
+                        } break;
+
                         case PERF_RECORD_AUX: {
                             const __u64 aux_head      = __atomic_load_n(&perf_metadata->aux_head, __ATOMIC_ACQUIRE);
                             const __u64 aux_tail      = __atomic_load_n(&perf_metadata->aux_tail, __ATOMIC_ACQUIRE);
@@ -884,12 +915,14 @@ static void perfed_setup(void) {
         perf_attrs.exclude_kernel = 1;
         //perf_attrs.exclude_hv     = 1;
         perf_attrs.exclude_idle   = 1;
-        //perf_attrs.mmap           = 1;
+        perf_attrs.mmap           = 1;
         perf_attrs.freq           = 1;
         perf_attrs.precise_ip     = 3;
+        perf_attrs.mmap_data      = 1;
         perf_attrs.sample_id_all  = 1;
         //perf_attrs.exclude_host   = 1;
         //perf_attrs.exclude_guest   = 1;
+        perf_attrs.mmap2          = 1;
         //perf_attrs.use_clockid    = 1;
         perf_attrs.context_switch = 1;
         //perf_attrs.aux_output     = 1;
