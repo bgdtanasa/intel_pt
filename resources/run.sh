@@ -26,13 +26,19 @@ function my_sed() {
 rm -rf objdump.*
 rm -rf dwarf.*
 
-U=$(grep "r-xp" /proc/$1/maps | awk '{print $6}')
+U=$(grep "r[-w]x[sp]" /proc/$1/maps | awk '{print $6}')
 
 for l in $U;
 do
-    a=$(basename $l)
+    if [[ -f $l ]];
+    then
+        a=$(basename $l)
+        echo "Generating resources for $l"
 
-    objdump -d $l | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.$a
-    llvm-dwarfdump --debug-frame $l | grep "  0x" | sort -k 1 -g > dwarf.$a
-    my_sed dwarf.$a
+        objdump -d $l | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.$a
+        llvm-dwarfdump --debug-frame $l | grep "  0x" | sort -k 1 -g > dwarf.$a
+        my_sed dwarf.$a
+    else
+        echo "Invalid resource $l"
+    fi
 done
