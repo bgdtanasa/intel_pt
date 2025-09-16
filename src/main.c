@@ -606,7 +606,9 @@ static void* perfing_main(void* args) {
                         } break;
 
                         case PERF_RECORD_MMAP2: {
-                            fprintf(stdout, "new mmap %s\n", perf_record->record_mmap2.filename);
+                            fprintf(stdout,
+                                    "       RECORD_MMAP2 :: %s\n",
+                                    perf_record->record_mmap2.filename);
                         } break;
 
                         case PERF_RECORD_AUX: {

@@ -85,8 +85,10 @@ void unwind(const int                            perfed_pid,
 unwind_again:
   inst   = xed_unwind_find_inst(cfa_regs[ 16u ]);
   if (inst == NULL) {
-    unwind_close();
-    fprintf(stderr, "UNWIND Instruction %16llx not found\n", cfa_regs[ 16u ]); for (;;) {}
+    fprintf(unwind_fp, "Broken unwind R16 %16llx\n\n", cfa_regs[ 16u ]);
+    //return;
+    //unwind_close();
+    fprintf(stderr, "UNWIND Instruction %16llx not found\n", cfa_regs[ 16u ]); return; for (;;) {}
   }
   unwind = (inst != NULL) ? (inst->unwind) : (NULL);
   if (unwind != NULL) {
@@ -116,19 +118,22 @@ unwind_again:
         } break;
 
         case REG_RULE_CFA: {
-          const unsigned long long int x = cfa + unwind->regs[ i ].u.cfa;
+          const unsigned long long int perfed_x  = cfa + unwind->regs[ i ].u.cfa;
+          const unsigned long long int perfing_x = kmod_find_addr(perfed_x);
 
-          if ((perfed_vma_a <= x) && (x < perfed_vma_b)) {
-            cfa_regs[ i ] = *((unsigned long long int*) (perfing_vma_a + x - perfed_vma_a));
+          if (perfing_x != 0llu) {
+            cfa_regs[ i ] = *((unsigned long long int*) (perfing_x));
           } else  {
-            unwind_close();
+            fprintf(unwind_fp, "Broken unwind R%02u %16llx\n\n", i, perfed_x);
+            //return;
+            //unwind_close();
             fprintf(stdout,
-                    "Reg %2u outside range :: %16llx :: %s %16llx %16llx\n",
+                    "Reg %2u outside range :: %16llx :: %64s %16llx %16llx\n",
                     i,
-                    x,
+                    perfed_x,
                     inst->binary,
                     inst->addr - inst->base_addr,
-                    unwind->addr - unwind->base_addr); for (;;) {}
+                    unwind->addr - unwind->base_addr); return; for (;;) {}
           }
         } break;
 

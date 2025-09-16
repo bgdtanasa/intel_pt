@@ -10,10 +10,8 @@
 
 #define MAX_SZ_PARAMS (512u)
 
-unsigned long perfing_vma_a;
-unsigned long perfing_vma_b;
-unsigned long perfed_vma_a;
-unsigned long perfed_vma_b;
+kmaps_t       kmaps;
+unsigned long no_kmaps;
 
 static const char* module_name = "kmod/main.ko";
 static char        module_params[ MAX_SZ_PARAMS ];
@@ -29,20 +27,26 @@ void kmod_load(const int perfed_pid) {
   } else {
     long ret;
 
+    // Fault this memory to help the kernel module
+    memset(&kmaps[ 0u ], 0, sizeof(kmaps));
     sprintf(&module_params[ 0u ],
-            "perfed_pid=%d perfing_vma_a=%lu perfing_vma_b=%lu perfed_vma_a=%lu perfed_vma_b=%lu",
+            "perfed_pid=%d kmaps=%lu no_kmaps=%lu",
             perfed_pid,
-            ((unsigned long) (&perfing_vma_a)),
-            ((unsigned long) (&perfing_vma_b)),
-            ((unsigned long) (&perfed_vma_a)),
-            ((unsigned long) (&perfed_vma_b)));
+            ((unsigned long) (&kmaps[ 0u ])),
+            ((unsigned long) (&no_kmaps)));
     ret = syscall(SYS_finit_module, fd, module_params, 0);
     if (ret == 0l) {
       fprintf(stdout, " finit_module(%s) success\n", module_name);
-      fprintf(stdout, "perfing_vma_a = %016lx\n", perfing_vma_a);
-      fprintf(stdout, "perfing_vma_b = %016lx -> %llu KB\n", perfing_vma_b, (perfing_vma_b - perfing_vma_a) / 1024llu);
-      fprintf(stdout, "perfed_vma_a  = %016lx\n", perfed_vma_a);
-      fprintf(stdout, "perfed_vma_b  = %016lx -> %llu KB\n", perfed_vma_b, (perfed_vma_b - perfed_vma_a) / 1024llu);
+
+      for (unsigned long i = 0lu; i < no_kmaps; i++) {
+        fprintf(stdout,
+                "kmap[ %4lu %16llx ] %016lx %016lx %8llu KB\n",
+                i,
+                ((unsigned long long int) (&kmaps[ i ])),
+                kmaps[ i ].perfed_a,
+                kmaps[ i ].perfing_a,
+                (kmaps[ i ].perfed_b - kmaps[ i ].perfed_a) / 1024llu);
+      }
     } else {
       fprintf(stderr,
               "finit_module(%s) failed :: %s\n",
@@ -63,4 +67,14 @@ void kmod_unload(void) {
             "main",
             strerror(errno));
   }
+}
+
+unsigned long long int kmod_find_addr(const unsigned long long int addr) {
+  for (unsigned long i = 0lu; i < no_kmaps; i++) {
+    if ((kmaps[ i ].perfed_a <= addr) && (addr < kmaps[ i ].perfed_b)) {
+      return ((unsigned long long int) (kmaps[ i ].perfing_a + addr - kmaps[ i ].perfed_a));
+    }
+  }
+
+  return 0llu;
 }

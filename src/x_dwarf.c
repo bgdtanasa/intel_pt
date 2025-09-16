@@ -181,9 +181,12 @@ unsigned long long int execute_dwarf_cfa_exp(const void* const      exp,
 
       case X_DWARF_DEREF: {
         if (stk_idx >= 1u) {
-          stk_idx--;
-          if ((perfed_vma_a <= stk[ stk_idx ]) && (stk[ stk_idx ] < perfed_vma_b)) {
-            stk[ stk_idx ] = *((unsigned long long int*) (perfing_vma_a + stk[ stk_idx ] - perfed_vma_a));
+          const unsigned long long int perfed_x  = stk[ stk_idx - 1u ];
+          const unsigned long long int perfing_x = kmod_find_addr(perfed_x);
+
+          if (perfing_x != 0llu) {
+            stk_idx--;
+            stk[ stk_idx ] = *((unsigned long long int*) (perfing_x));
             stk_idx++;
           } else  {
             fprintf(stderr, "X_DWARF_DEREF outside range :: %016llx\n", stk[ stk_idx ]); for (;;) {}
@@ -263,10 +266,11 @@ unsigned long long int execute_dwarf_cfa_exp(const void* const      exp,
 
 unsigned long long int execute_dwarf_reg_exp(const void* const      exp,
                                              unsigned long long int cfa_regs[ MAX_NO_REGS ]) {
-  const unsigned long long int x = execute_dwarf_cfa_exp(exp, cfa_regs);
+  const unsigned long long int perfed_x  = execute_dwarf_cfa_exp(exp, cfa_regs);
+  const unsigned long long int perfing_x = kmod_find_addr(perfed_x);
 
-  if ((perfed_vma_a <= x) && (x < perfed_vma_b)) {
-    return *((unsigned long long int*) (perfing_vma_a + x - perfed_vma_a));
+  if (perfing_x != 0llu) {
+    return *((unsigned long long int*) (perfing_x));
   } else  {
     fprintf(stdout, "REG_EXP outside range\n"); for (;;) {}
     return 0llu;
