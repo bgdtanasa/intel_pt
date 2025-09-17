@@ -9,8 +9,12 @@
 #include <fcntl.h>
 
 #include <sys/mman.h>
+#include <sys/uio.h>
 
 #include <linux/kernel-page-flags.h>
+
+amaps_t      amaps;
+unsigned int no_amaps;
 
 static char buffer[ 512u ];
 
@@ -116,6 +120,15 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
 
                         if ((binary == NULL) || (strlen(binary) == 0)) {
                             fprintf(stdout, "Anonymous executable mapping %16llx - %16llx %s\n", a, b, line);
+
+                            amaps[ no_amaps ] = (amap_t) {
+                                .a = a,
+                                .b = b
+                            };
+                            no_amaps++;
+                            if (no_amaps >= MAX_NO_AMAPS) {
+                                fprintf(stderr, "Not enough space to load the anonymous mappings\n"); for (;;) {}
+                            }
                         } else {
                             if (parse_get_binary(binary, 0u) == NULL) {
                                 const unsigned int           is_pie    = binary_is_pie(line);
@@ -147,4 +160,36 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
                 &buffer[ 0u ],
                 strerror(errno));
     }
+}
+
+unsigned long long int proc_read_perfed_vm(const int                    perfed_pid,
+                                           const unsigned long long int addr) {
+    if (addr == 0llu) {
+        return  0llu;
+    }
+
+    unsigned long long int vm_entry = 0llu;
+    struct iovec           local    = {
+        .iov_base = &vm_entry,
+        .iov_len  = sizeof(vm_entry)
+    };
+    struct iovec           remote   = {
+        .iov_base = ((void*) (addr)),
+        .iov_len  = sizeof(vm_entry)
+    };
+    ssize_t                n        = process_vm_readv(perfed_pid, &local, 1, &remote, 1, 0);
+
+    if (n == -1) {
+        fprintf(stderr,
+                "process_vm_readv(%016llx) failed :: %s\n",
+                addr,
+                strerror(errno));
+    } else {
+        fprintf(stdout,
+                "process_vm_readv(%016llx) = %16llx\n",
+                addr,
+                vm_entry);
+    }
+
+    return (n == -1) ? (0llu) : (vm_entry);
 }

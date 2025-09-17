@@ -1,5 +1,6 @@
 #include "xed.h"
 #include "pmu.h"
+#include "proc.h"
 
 #include <string.h>
 #include <errno.h>
@@ -8,7 +9,6 @@
 #include <stdlib.h>
 
 #include <sys/types.h>
-#include <sys/uio.h>
 
 #include "xed-build-defines.h"
 #include "xed-common-defs.h"
@@ -80,30 +80,6 @@ static unsigned long long int branches_cyc_cnt_en;
 
 extern double tsc_factor;
 extern double cbr_factor;
-
-#if 0
-static unsigned long long int read_perfed_vm(const int perfed_pid, const unsigned long long int addr) {
-  unsigned long long int vm_entry = 0llu;
-  struct iovec           local    = {
-    .iov_base = &vm_entry,
-    .iov_len  = sizeof(vm_entry)
-  };
-  struct iovec           remote   = {
-    .iov_base = ((void*) (addr)),
-    .iov_len  = sizeof(vm_entry)
-  };
-  ssize_t                n        = process_vm_readv(perfed_pid, &local, 1, &remote, 1, 0);
-
-  if (n == -1) {
-    fprintf(stderr,
-            "process_vm_readv(%016llx) failed :: %s\n",
-            addr,
-            strerror(errno));
-  }
-
-  return (n == -1) ? (0llu) : (vm_entry);
-}
-#endif
 
 const char* parse_get_binary(const char* const xed_file, const unsigned int add_file) {
   for (unsigned int i = 0u; i < no_binaries; i++) {
@@ -377,7 +353,6 @@ xed_decode_inst:
                   const xed_reg_enum_t xed_reg = xed_decoded_inst_get_base_reg(&xedd, 0u);
 
                   if (xed_reg == XED_REG_RIP) {
-                    //insts[ no_insts ].cofi.u.c.addr = read_perfed_vm(perfed_pid, addr + xed_decoded_inst_get_memory_displacement(&xedd, 0u) + ((int64_t) (xedd_length)));
                   } else {
                     // What to do in this case?!
                   }
@@ -416,7 +391,6 @@ xed_decode_inst:
                   const xed_reg_enum_t xed_reg = xed_decoded_inst_get_base_reg(&xedd, 0u);
 
                   if (xed_reg == XED_REG_RIP) {
-                    //insts[ no_insts ].cofi.u.j.addr = read_perfed_vm(perfed_pid, addr + xed_decoded_inst_get_memory_displacement(&xedd, 0u) + ((int64_t) (xedd_length)));
                   } else {
                     // What to do in this case?!
                   }
@@ -779,6 +753,16 @@ void xed_update_last_inst(const unsigned long long addr) {
   } else {
     last_inst = -1ll;
 
+    for (unsigned int i = 0u; i < no_amaps; i++) {
+      if ((amaps[ i ].a <= addr) && (addr < amaps[ i ].b)) {
+        fprintf(stdout,
+                "XED Instruction %16llx found in anonymous mapping %16llx %16llx\n",
+                addr,
+                amaps[ i ].a,
+                amaps[ i ].b);
+        return;
+      }
+    }
     xed_close();
     fprintf(stderr, "XED Instruction %16llx not found\n", addr); for (;;) {}
   }
@@ -838,6 +822,9 @@ void xed_process_branches(const unsigned int           tnt,
   fprintf(branches_fp, "%16llx\n", insts[ last_inst ].addr);
 #endif
   for (;;) {
+    if (last_inst == -1ll) {
+      break;
+    }
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
 #if defined(PRINT_XED_BRANCHES_ONLY)
     if (insts[ last_inst ].cofi.type != 0u) {
@@ -1020,6 +1007,10 @@ void xed_process_branches(const unsigned int           tnt,
 }
 
 const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
+  if (addr == 0llu) {
+    return NULL;
+  }
+
   signed long long int a = 0ll;
   signed long long int b = ((signed long long int) (no_insts - 1llu));
   signed long long int m;
