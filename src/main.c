@@ -451,53 +451,6 @@ static void perfed_msr(void) {
     }
 }
 
-#if 0
-static void perfing_flush(void) {
-    if ((perfed_is_stopped == 1u) || (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1)) {
-        int status = 0;
-
-        if ((perfed_is_stopped == 1u) || (waitpid(perfed_pid, &status, 0) == perfed_pid)) {
-            if ((perfed_is_stopped == 1u) || (WIFSTOPPED(status))) {
-                unsigned int no_retries = 0u;
-
-                fprintf(stdout, "Flushing Intel PT %u ...\n", perfed_is_stopped);
-                ioctl(perfing_fd, PERF_EVENT_IOC_DISABLE, 0);
-                for (;;) {
-                    const __u64 data_head = perf_metadata->data_head;
-                    __u64       data_tail = __atomic_load_n(&perf_metadata->data_tail, __ATOMIC_ACQUIRE);
-
-                    if (data_tail != data_head) {
-                        perf_metadata->aux_tail = perf_metadata->aux_head;
-                        __atomic_store_n(&perf_metadata->data_tail, data_head, __ATOMIC_RELEASE);
-
-                        no_retries = 0u;
-                    } else {
-                        if (no_retries == 25u) {
-                            break;
-                        } else {
-                            const struct timespec ts = {
-                                .tv_sec  = 0,
-                                .tv_nsec = 1000 * 1000
-                            };
-
-                            clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, NULL);
-                        }
-                        no_retries++;
-                    }
-                }
-                intel_pt_reset();
-                ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
-                if (perfed_is_stopped == 1u) {
-                    return;
-                }
-
-                ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
-            }
-        }
-    }
-}
-#endif
-
 static void* perfing_main(void* args) {
     (void) (args);
 
@@ -607,8 +560,28 @@ static void* perfing_main(void* args) {
 
                         case PERF_RECORD_MMAP2: {
                             fprintf(stdout,
-                                    "       RECORD_MMAP2 :: %s\n",
-                                    perf_record->record_mmap2.filename);
+                                    "       RECORD_MMAP2 :: %16llx - %16llx %c%c%c%c %s\n",
+                                    perf_record->record_mmap2.addr,
+                                    perf_record->record_mmap2.addr + perf_record->record_mmap2.len,
+                                    (perf_record->record_mmap2.prot & PROT_READ)   ? ('r') : ('-'),
+                                    (perf_record->record_mmap2.prot & PROT_WRITE)  ? ('w') : ('-'),
+                                    (perf_record->record_mmap2.prot & PROT_EXEC)   ? ('x') : ('-'),
+                                    (perf_record->record_mmap2.flags & MAP_SHARED) ? ('s') : ('p'),
+                                    &perf_record->record_mmap2.filename[ 0u ]);
+
+                            perfing_is_running = 2u;
+                            if (perf_record->record_mmap2.prot & PROT_EXEC) {
+                                fprintf(stdout, "New executable mapping\n");
+                            } else if ((perf_record->record_mmap2.prot & PROT_READ)  &&
+                                       (perf_record->record_mmap2.prot & PROT_WRITE) &&
+                                       (perf_record->record_mmap2.flags & MAP_PRIVATE)) {
+                                if (strstr(&perf_record->record_mmap2.filename[ 0u ], "anon") != NULL) {
+                                    fprintf(stdout, "New possible stack\n");
+                                } else if (strstr(&perf_record->record_mmap2.filename[ 0u ], "heap") != NULL) {
+                                    // Check if the increasing of the heap changed the executable mappings
+                                    perfing_is_running = 1u;
+                                }
+                            }
                         } break;
 
                         case PERF_RECORD_AUX: {
@@ -841,14 +814,10 @@ static void* perfing_main(void* args) {
             }
 
             if (perfing_is_running == 0u) {
-                fprintf(stdout, "Shutting Intel PT ...\n");
+                fprintf(stdout, "Killing Intel PT ...\n");
                 break;
             } else if (perfing_is_running == 2u) {
-                fprintf(stdout, "Reseting Intel PT ...\n");
-
-                //perfing_flush();
-
-                fprintf(stdout, "Enabling Intel PT ...\n");
+                fprintf(stdout, "Disabling Intel PT ...\n");
                 perfing_is_running = 1u;
                 break;
             }
@@ -918,6 +887,7 @@ static void perfed_setup(void) {
         //perf_attrs.exclude_hv     = 1;
         perf_attrs.exclude_idle   = 1;
         perf_attrs.mmap           = 1;
+        perf_attrs.comm           = 1;
         perf_attrs.freq           = 1;
         perf_attrs.precise_ip     = 3;
         perf_attrs.mmap_data      = 1;
@@ -925,9 +895,13 @@ static void perfed_setup(void) {
         //perf_attrs.exclude_host   = 1;
         //perf_attrs.exclude_guest   = 1;
         perf_attrs.mmap2          = 1;
+        perf_attrs.comm_exec      = 1;
         //perf_attrs.use_clockid    = 1;
         perf_attrs.context_switch = 1;
+        perf_attrs.ksymbol        = 1;
+        perf_attrs.bpf_event      = 1;
         //perf_attrs.aux_output     = 1;
+        perf_attrs.text_poke      = 1;
         perf_attrs.clockid        = CLOCK_MONOTONIC_RAW;
         perf_attrs.aux_watermark    = ONE_MB;
 

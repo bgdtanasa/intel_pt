@@ -1,6 +1,7 @@
 #include "x_unwind.h"
 #include "kmod.h"
 #include "xed.h"
+#include "proc.h"
 
 #include <stdio.h>
 #include <time.h>
@@ -85,6 +86,10 @@ void unwind(const int                            perfed_pid,
 unwind_again:
   inst   = xed_unwind_find_inst(cfa_regs[ 16u ]);
   if (inst == NULL) {
+    if (cfa_regs[ 16u ] == 0llu) {
+      return;
+    }
+
     fprintf(unwind_fp, "Broken unwind R16 %16llx\n\n", cfa_regs[ 16u ]);
     //return;
     //unwind_close();
@@ -119,21 +124,28 @@ unwind_again:
 
         case REG_RULE_CFA: {
           const unsigned long long int perfed_x  = cfa + unwind->regs[ i ].u.cfa;
-          const unsigned long long int perfing_x = kmod_find_addr(perfed_x);
+          unsigned long long int       perfing_x = kmod_find_addr(perfed_x);
 
           if (perfing_x != 0llu) {
             cfa_regs[ i ] = *((unsigned long long int*) (perfing_x));
           } else  {
-            fprintf(unwind_fp, "Broken unwind R%02u %16llx\n\n", i, perfed_x);
-            //return;
-            //unwind_close();
-            fprintf(stdout,
-                    "Reg %2u outside range :: %16llx :: %64s %16llx %16llx\n",
-                    i,
-                    perfed_x,
-                    inst->binary,
-                    inst->addr - inst->base_addr,
-                    unwind->addr - unwind->base_addr); return; for (;;) {}
+            perfing_x = proc_read_perfed_vm(perfed_pid, perfed_x);
+            if (perfing_x != 0llu) {
+              cfa_regs[ i ] = perfing_x;
+
+              fprintf(unwind_fp, "Restored unwind R%02u %16llx\n\n", i, perfed_x);
+            } else {
+              fprintf(unwind_fp, "Broken unwind R%02u %16llx\n\n", i, perfed_x);
+              //return;
+              //unwind_close();
+              fprintf(stdout,
+                      "Reg %2u outside range :: %16llx :: %64s %16llx %16llx\n",
+                      i,
+                      perfed_x,
+                      inst->binary,
+                      inst->addr - inst->base_addr,
+                      unwind->addr - unwind->base_addr); return; for (;;) {}
+            }
           }
         } break;
 
