@@ -49,7 +49,7 @@
 #define SHORT_TNT_MASK (0x01u)
 
 #define PRINT_FORMAT "%10s :: "
-#if 0
+#if 1
 #define PRINT_PT
 #endif
 
@@ -181,8 +181,6 @@ static unsigned long long int cyc_cnt_ref;
 double tsc_factor;
 double base_factor;
 double cbr_factor;
-
-static unsigned int xed_enable = 0u;
 
 static void print_intel_pt_bytes(const volatile unsigned char* const x,
                                  const unsigned long long int        n,
@@ -507,27 +505,21 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
 #endif
   if (ip != 0llu) {
     if (pkt_type == INTEL_PT_PKT_FUP) {
-      if ((xed_enable == 0u) && ((last_intel_pt_pkt_b != NULL) && (last_intel_pt_pkt_b->type == INTEL_PT_PKT_OVF))) {
-        xed_enable = 1u;
+      if ((last_intel_pt_pkt_b != NULL) && (last_intel_pt_pkt_b->type == INTEL_PT_PKT_OVF)) {
         xed_intel_pt_ovf_fup(ip, tsc_approx_ref, last_intel_pt_pkt_b->cyc_cnt);
         xed_update_last_inst(ip);
+        xed_process_branches(0u, 0u, 0u, tsc_approx_ref, last_intel_pt_pkt_b->cyc_cnt);
 
 #if defined(PRINT_PT)
         fprintf(stdout, " FUP OVF      = %20llx %3d\n", ip, last_intel_pt_pkt_b->type);
 #endif
       }
     } else if (pkt_type == INTEL_PT_PKT_TIP_PGE) {
-      if (xed_enable == 0u) {
-        xed_enable = 1u;
-      }
-      if (xed_enable == 1u) {
-        xed_intel_pt_tip_enable(ip, tsc_approx_ref, cyc_cnt_ref);
-        xed_update_last_inst(ip);
-      }
+      xed_intel_pt_tip_enable(ip, tsc_approx_ref, cyc_cnt_ref);
+      xed_update_last_inst(ip);
+      xed_process_branches(0u, 0u, 0u, tsc_approx_ref, cyc_cnt_ref);
     } else if (pkt_type == INTEL_PT_PKT_TIP) {
-      if (xed_enable == 1u) {
-        xed_process_branches(0u, 0u, ip, tsc_approx_ref, cyc_cnt_ref);
-      }
+      xed_process_branches(0u, 0u, ip, tsc_approx_ref, cyc_cnt_ref);
     } else if (pkt_type == INTEL_PT_PKT_TIP_PGD) {
       fprintf(stderr, "ip_decode error :: 0 ip = %16llx pkt_type = %3d\n", ip, pkt_type); for (;;) { }
     } else {
@@ -535,8 +527,6 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
     }
   } else {
     xed_intel_pt_tip_disable(tsc_approx_ref, cyc_cnt_ref);
-    xed_enable = 0u;
-    xed_reset_last_inst();
 
     if (pkt_type != INTEL_PT_PKT_TIP_PGD) {
       fprintf(stderr, "ip_decode error :: 2 ip = %16llx pkt_type = %3d\n", ip, pkt_type); for (;;) { }
@@ -638,7 +628,6 @@ decode_again:
       }
 
       xed_reset_call_stack();
-      xed_enable = 0u;
       xed_reset_last_inst();
 
 #if defined(PRINT_PT)
@@ -749,12 +738,16 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 8llu) && (*x_16 == PIP)) {
-      const unsigned long long int cr3 = ((((unsigned long long int) (x[ 7u ])) & 0xFFllu) << 44llu) |
-                                         ((((unsigned long long int) (x[ 6u ])) & 0xFFllu) << 36llu) |
-                                         ((((unsigned long long int) (x[ 5u ])) & 0xFFllu) << 28llu) |
-                                         ((((unsigned long long int) (x[ 4u ])) & 0xFFllu) << 20llu) |
-                                         ((((unsigned long long int) (x[ 3u ])) & 0xFFllu) << 12llu) |
-                                         ((((unsigned long long int) (x[ 2u ])) & 0xFEllu) <<  4llu);
+      const unsigned long long int cr3 = (((unsigned long long int) (x[ 7u ])) << 44llu) |
+                                         (((unsigned long long int) (x[ 6u ])) << 36llu) |
+                                         (((unsigned long long int) (x[ 5u ])) << 28llu) |
+                                         (((unsigned long long int) (x[ 4u ])) << 20llu) |
+                                         (((unsigned long long int) (x[ 3u ])) << 12llu) |
+                                         (((unsigned long long int) (x[ 2u ])) <<  4llu);
+
+#if defined(PRINT_PT)
+      fprintf(stdout, "PIP           = %20llx\n", cr3);
+#endif
 
       record_intel_pt_pkt(INTEL_PT_PKT_PIP, cr3, cyc_cnt_ref, x, n);
       x += 8llu;
@@ -851,6 +844,10 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 2llu) && (*x_8 == MODE)) {
+#if defined(PRINT_PT)
+      fprintf(stdout, "MODE          = %20llx\n", ((unsigned long long int) (x[ 1u ])));
+#endif
+
       record_intel_pt_pkt(INTEL_PT_PKT_MODE, ((unsigned long long int) (x[ 1u ])), cyc_cnt_ref, x, n);
       x += 2llu;
       n -= 2llu;
@@ -1038,13 +1035,18 @@ cyc_again:
       const unsigned int short_tnt = ((unsigned int) (x[ 0u ]));
 
       asm volatile ("bsr %1, %0": "=r"(p_one) : "r"(short_tnt) : );
-      if (xed_enable == 1u) {
-        xed_process_branches((short_tnt >> 1u) & ((1u << (p_one - 1u)) - 1u),
-                             p_one - 1u,
-                             0llu,
-                             tsc_approx_ref,
-                             cyc_cnt_ref);
-      }
+      xed_process_branches((short_tnt >> 1u) & ((1u << (p_one - 1u)) - 1u),
+                           p_one - 1u,
+                           0llu,
+                           tsc_approx_ref,
+                           cyc_cnt_ref);
+
+#if defined(PRINT_PT)
+      fprintf(stdout,
+              "SHORT_TNT     = %20x %3u\n",
+              (short_tnt >> 1u) & ((1u << (p_one - 1u)) - 1u),
+              p_one - 1u);
+#endif
 
       record_intel_pt_pkt(INTEL_PT_PKT_SHORT_TNT, ((unsigned long long int) (short_tnt)), cyc_cnt_ref, x, n);
       x += 1llu;
@@ -1065,6 +1067,5 @@ cyc_again:
 }
 
 void intel_pt_reset(void) {
-  xed_enable = 0u;
   xed_reset_last_inst();
 }

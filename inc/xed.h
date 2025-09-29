@@ -21,7 +21,7 @@
 #endif
 #endif
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-#if 1
+#if 0
 #define PRINT_XED_OPCODE
 #endif
 #endif

@@ -32,7 +32,7 @@
 #include "kmod.h"
 #include "x_unwind.h"
 
-#if 1
+#if 0
 #define DO_PTRACE
 #endif
 #if defined(DO_PTRACE)
@@ -45,12 +45,12 @@
 #endif
 
 //  /sys/bus/event_source/devices/intel_pt/type
-#define INTEL_PT_TYPE              ((__u32) (12u))
+#define INTEL_PT_TYPE              ((__u32) (10u))
 // /sys/bus/event_source/devices/intel_pt/format/*
 #define INTEL_PT_CONFIG_PT         ((__u64) (1llu <<  0llu))
 #define INTEL_PT_CONFIG_CYC        ((__u64) (1llu <<  1llu))
 #define INTEL_PT_CONFIG_PWR_EVT    ((__u64) (1llu <<  4llu))
-#define INTEL_PT_CONFIG_FUP_ON_PTW ((__u64) (1llu <<  5llu))
+#define INTEL_PT_CONFIG_FUP_ON_PTW ((__u64) (0llu <<  5llu))
 #define INTEL_PT_CONFIG_MTC        ((__u64) (1llu <<  9llu))
 #define INTEL_PT_CONFIG_TSC        ((__u64) (1llu << 10llu))
 #if defined(EN_RET_COMPRESSION)
@@ -58,7 +58,7 @@
 #else
 #define INTEL_PT_CONFIG_NORETCOMP  ((__u64) (1llu << 11llu))
 #endif
-#define INTEL_PT_CONFIG_PTW        ((__u64) (1llu << 12llu))
+#define INTEL_PT_CONFIG_PTW        ((__u64) (0llu << 12llu))
 #define INTEL_PT_CONFIG_BRANCH     ((__u64) (1llu << 13llu))
 #define INTEL_PT_CONFIG_MTC_PERIOD ((__u64) (0llu << 14llu))
 #define INTEL_PT_CONFIG_CYC_THRESH ((__u64) (0llu << 19llu))
@@ -143,6 +143,8 @@ typedef struct {
     sample_id_t sample_id;
 } perf_record_lost_t;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 typedef struct {
     __u32 pid;
     __u32 tid;
@@ -168,6 +170,7 @@ typedef struct {
     char        filename[ 0u ];
     sample_id_t id;
 } perf_record_mmap2_t;
+#pragma GCC diagnostic pop
 
 typedef struct {
     __u64       aux_offset;
@@ -264,6 +267,23 @@ static void perfed_msr(void) {
             fprintf(stdout, "IA32_TSC_ADJUST = %016llx\n", msr_val);
 
             tsc_adj = msr_val;
+        }
+        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_RTIT_CTL) == sizeof(msr_val)) {
+            fprintf(stdout, "IA32_RTIT_CTL   = %016llx\n", msr_val);
+            fprintf(stdout, "\tTraceEn   = %16llx\n", (msr_val >>  0llu) & 0x01llu);
+            fprintf(stdout, "\tCYCEn     = %16llx\n", (msr_val >>  1llu) & 0x01llu);
+            fprintf(stdout, "\tOS        = %16llx\n", (msr_val >>  2llu) & 0x01llu);
+            fprintf(stdout, "\tUser      = %16llx\n", (msr_val >>  3llu) & 0x01llu);
+            fprintf(stdout, "\tCR3Filter = %16llx\n", (msr_val >>  7llu) & 0x01llu);
+            fprintf(stdout, "\tToPA      = %16llx\n", (msr_val >>  8llu) & 0x01llu);
+            fprintf(stdout, "\tMTCEn     = %16llx\n", (msr_val >>  9llu) & 0x01llu);
+            fprintf(stdout, "\tTSCEn     = %16llx\n", (msr_val >> 10llu) & 0x01llu);
+            fprintf(stdout, "\tDisRETC   = %16llx\n", (msr_val >> 11llu) & 0x01llu);
+            fprintf(stdout, "\tBranchEn  = %16llx\n", (msr_val >> 13llu) & 0x01llu);
+            fprintf(stdout, "\tMTCFreq   = %16llx\n", (msr_val >> 14llu) & 0x0Fllu);
+            fprintf(stdout, "\tCycThresh = %16llx\n", (msr_val >> 19llu) & 0x0Fllu);
+            fprintf(stdout, "\tPSBFreq   = %16llx\n", (msr_val >> 24llu) & 0x0Fllu);
+            fprintf(stdout, "\tInjectPsb = %16llx\n", (msr_val >> 56llu) & 0x01llu);
         }
 #if 0
         if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PERFEVTSEL0) == sizeof(msr_val)) {
@@ -379,23 +399,6 @@ static void perfed_msr(void) {
                 }
             }
 #endif
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_RTIT_CTL) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_RTIT_CTL = %016llx\n", msr_val);
-            fprintf(stdout, "\tTraceEn        = %16llx\n", (msr_val >>  0llu) & 0x01llu);
-            fprintf(stdout, "\tCYCEn          = %16llx\n", (msr_val >>  1llu) & 0x01llu);
-            fprintf(stdout, "\tOS             = %16llx\n", (msr_val >>  2llu) & 0x01llu);
-            fprintf(stdout, "\tUser           = %16llx\n", (msr_val >>  3llu) & 0x01llu);
-            fprintf(stdout, "\tCR3Filter      = %16llx\n", (msr_val >>  7llu) & 0x01llu);
-            fprintf(stdout, "\tToPA           = %16llx\n", (msr_val >>  8llu) & 0x01llu);
-            fprintf(stdout, "\tMTCEn          = %16llx\n", (msr_val >>  9llu) & 0x01llu);
-            fprintf(stdout, "\tTSCEn          = %16llx\n", (msr_val >> 10llu) & 0x01llu);
-            fprintf(stdout, "\tDisRETC        = %16llx\n", (msr_val >> 11llu) & 0x01llu);
-            fprintf(stdout, "\tBranchEn       = %16llx\n", (msr_val >> 13llu) & 0x01llu);
-            fprintf(stdout, "\tMTCFreq        = %16llx\n", (msr_val >> 14llu) & 0x0Fllu);
-            fprintf(stdout, "\tCycThresh      = %16llx\n", (msr_val >> 19llu) & 0x0Fllu);
-            fprintf(stdout, "\tPSBFreq        = %16llx\n", (msr_val >> 24llu) & 0x0Fllu);
-            fprintf(stdout, "\tInjectPsb      = %16llx\n", (msr_val >> 56llu) & 0x01llu);
         }
         if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_RTIT_STATUS) == sizeof(msr_val)) {
             fprintf(stdout, "IA32_RTIT_STATUS = %016llx\n", msr_val);
@@ -558,6 +561,9 @@ static void* perfing_main(void* args) {
                                     no_record_lost);
                         } break;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wzero-length-bounds"
+#pragma GCC diagnostic ignored "-Wstringop-overread"
                         case PERF_RECORD_MMAP2: {
                             fprintf(stdout,
                                     "       RECORD_MMAP2 :: %16llx - %16llx %c%c%c%c %s\n",
@@ -569,7 +575,6 @@ static void* perfing_main(void* args) {
                                     (perf_record->record_mmap2.flags & MAP_SHARED) ? ('s') : ('p'),
                                     &perf_record->record_mmap2.filename[ 0u ]);
 
-                            perfing_is_running = 2u;
                             if (perf_record->record_mmap2.prot & PROT_EXEC) {
                                 fprintf(stdout, "New executable mapping\n");
                             } else if ((perf_record->record_mmap2.prot & PROT_READ)  &&
@@ -579,10 +584,10 @@ static void* perfing_main(void* args) {
                                     fprintf(stdout, "New possible stack\n");
                                 } else if (strstr(&perf_record->record_mmap2.filename[ 0u ], "heap") != NULL) {
                                     // Check if the increasing of the heap changed the executable mappings
-                                    perfing_is_running = 1u;
                                 }
                             }
                         } break;
+#pragma GCC diagnostic pop
 
                         case PERF_RECORD_AUX: {
                             const __u64 aux_head      = __atomic_load_n(&perf_metadata->aux_head, __ATOMIC_ACQUIRE);
@@ -883,7 +888,11 @@ static void perfed_setup(void) {
         perf_attrs.disabled       = 1;
         //perf_attrs.pinned         = 1;
         //perf_attrs.exclusive      = 1;
+#if defined(EN_VMLINUZ)
+        perf_attrs.exclude_kernel = 0;
+#else
         perf_attrs.exclude_kernel = 1;
+#endif
         //perf_attrs.exclude_hv     = 1;
         perf_attrs.exclude_idle   = 1;
         perf_attrs.mmap           = 1;
@@ -975,6 +984,25 @@ static void sig_action_SIGINT(int sig_no, siginfo_t* sig_info, void* u_ctx) {
     perfing_is_running = 0u;
 }
 
+static void sig_action_SIGRT(int sig_no, siginfo_t* sig_info, void* u_ctx) {
+    (void) sig_no;
+    (void) sig_info;
+    (void) u_ctx;
+
+    if (sig_no == SIGRTMIN + 0) {
+        fprintf(stdout, "SIG = %s\n", "New executable mapping");
+
+        perfing_is_running = 2u;
+    } else if (sig_no == SIGRTMIN + 1) {
+        fprintf(stdout, "SIG = %s\n", "New possible stack");
+
+        no_new_a_maps++;
+    } else if (sig_no == SIGRTMAX) {
+        fprintf(stdout, "SIG = %s\n", "New mapping");
+    } else {
+    }
+}
+
 int main(int argc, char *argv[ ]) {
     struct sigaction sig_action;
 
@@ -987,6 +1015,13 @@ int main(int argc, char *argv[ ]) {
     sig_action.sa_flags     = SA_SIGINFO;
     sig_action.sa_sigaction = &sig_action_SIGINT;
     sigaction(SIGINT, &sig_action, NULL);
+
+    memset(&sig_action, 0, sizeof(sig_action));
+    sig_action.sa_flags     = SA_SIGINFO;
+    sig_action.sa_sigaction = &sig_action_SIGRT;
+    sigaction(SIGRTMIN + 0, &sig_action, NULL);
+    sigaction(SIGRTMIN + 1, &sig_action, NULL);
+    sigaction(SIGRTMAX,     &sig_action, NULL);
 
     if (argc >= 4) {
         perfed_pid  = atoi(argv[ 1u ]);

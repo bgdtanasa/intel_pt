@@ -84,9 +84,7 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
     if (fp != NULL) {
         fprintf(stdout, "====== PROC ======\n");
         for (;;) {
-            char* line = fgets(&buffer[ 0u ],
-                               ((int) (sizeof(buffer))),
-                               fp);
+            char* line = fgets(&buffer[ 0u ], ((int) (sizeof(buffer))), fp);
             if (line != NULL) {
                 unsigned long long int a;
                 unsigned long long int b;
@@ -150,6 +148,11 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
                 break;
             }
         }
+#if defined(EN_VMLINUZ)
+        fprintf(stdout, "%64s %08llx %u :: ", "vmlinux", 0xffffffff81000000llu, 0u);
+        parse_dwarf("vmlinux", 0xffffffff81000000llu);
+        parse_objdump(perfed_pid, "vmlinux", 0xffffffff81000000llu);
+#endif
         fprintf(stdout, "====== PROC ======\n");
 
         xed_unwind_link_inst_and_dwarf();

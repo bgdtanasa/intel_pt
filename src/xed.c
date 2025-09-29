@@ -234,7 +234,7 @@ reg_again:
     fprintf(stderr,
             "fopen(%s) failed :: %s\n",
             dwarf_file,
-            strerror(errno));
+            strerror(errno)); for (;;) {}
   }
 }
 
@@ -337,15 +337,18 @@ xed_decode_inst:
             memcpy(&insts[ no_insts ].bytes[ 0u ], &inst_bytes[ 0u ], n_bytes);
             insts[ no_insts ].length    = xedd_length;
 
-            if (xed_inst_get_attribute(xedd_dec, XED_ATTRIBUTE_INDIRECT_BRANCH) == 1u) {
-              insts[ no_insts ].cofi.type |= INDIRECT_BRANCH;
-            }
             if (xed_inst_get_attribute(xedd_dec, XED_ATTRIBUTE_FAR_XFER) == 1u) {
               insts[ no_insts ].cofi.type |= FAR_TRANSFER;
             }
             if (xedd_category == XED_CATEGORY_CALL) {
-              if (insts[ no_insts ].cofi.type == 0u) {
-                insts[ no_insts ].cofi.type |= UNCOND_DIRECT_BRANCH;
+              if (xedd_iclass == XED_ICLASS_CALL_FAR) {
+                insts[ no_insts ].cofi.type |= FAR_TRANSFER;
+              } else if (xedd_iclass == XED_ICLASS_CALL_NEAR) {
+                if (xed_inst_get_attribute(xedd_dec, XED_ATTRIBUTE_INDIRECT_BRANCH) == 1u) {
+                  insts[ no_insts ].cofi.type |= INDIRECT_BRANCH;
+                } else {
+                  insts[ no_insts ].cofi.type |= UNCOND_DIRECT_BRANCH;
+                }
               }
 
               if (xedd_dec_no_mem_ops >= 1u) {
@@ -381,9 +384,15 @@ xed_decode_inst:
               //        insts[ no_insts ].cofi.u.c.ret_to.addr,
               //        insts[ no_insts ].cofi.type);
             } else if ((xedd_category == XED_CATEGORY_COND_BR) || (xedd_category == XED_CATEGORY_UNCOND_BR)) {
-              if (insts[ no_insts ].cofi.type == 0u) {
-                insts[ no_insts ].cofi.type |= (xedd_category == XED_CATEGORY_COND_BR) ? (COND_BRANCH) : (0u);
-                insts[ no_insts ].cofi.type |= (xedd_category == XED_CATEGORY_UNCOND_BR) ? (UNCOND_DIRECT_BRANCH) : (0u);
+              if (xedd_iclass == XED_ICLASS_JMP_FAR) {
+                insts[ no_insts ].cofi.type |= FAR_TRANSFER;
+              } else {
+                if (xed_inst_get_attribute(xedd_dec, XED_ATTRIBUTE_INDIRECT_BRANCH) == 1u) {
+                  insts[ no_insts ].cofi.type |= INDIRECT_BRANCH;
+                } else {
+                  insts[ no_insts ].cofi.type |= (xedd_category == XED_CATEGORY_COND_BR)   ? (COND_BRANCH)          : (0u);
+                  insts[ no_insts ].cofi.type |= (xedd_category == XED_CATEGORY_UNCOND_BR) ? (UNCOND_DIRECT_BRANCH) : (0u);
+                }
               }
 
               if (xedd_dec_no_mem_ops >= 1u) {
@@ -411,38 +420,35 @@ xed_decode_inst:
               }
               //fprintf(stdout, "\nJMP  = %016llx -> %016llx %02x", addr, insts[ no_insts ].cofi.u.j.addr, insts[ no_insts ].cofi.type);
             } else if (xedd_category == XED_CATEGORY_RET) {
-              if (insts[ no_insts ].cofi.type == 0u) {
+              if ((xedd_iclass == XED_ICLASS_IRET)  ||
+                  (xedd_iclass == XED_ICLASS_IRETD) ||
+                  (xedd_iclass == XED_ICLASS_IRETQ) ||
+                  (xedd_iclass == XED_ICLASS_RET_FAR)) {
+                insts[ no_insts ].cofi.type |= FAR_TRANSFER;
+              } else {
                 insts[ no_insts ].cofi.type |= INDIRECT_BRANCH;
               }
-
               //fprintf(stdout, "\nRET %02x", insts[ no_insts ].cofi.type);
-            } else if (xedd_category == XED_CATEGORY_SYSCALL) {
-              if (insts[ no_insts ].cofi.type == 0u) {
-                insts[ no_insts ].cofi.type |= FAR_TRANSFER;
-              }
+            } else if ((xedd_category == XED_CATEGORY_INTERRUPT) ||
+                       (xedd_category == XED_CATEGORY_SYSCALL)   ||
+                       (xedd_category == XED_CATEGORY_SYSRET)    ||
+                       (xedd_iclass == XED_ICLASS_INT1)          ||
+                       (xedd_iclass == XED_ICLASS_INT3)          ||
+                       (xedd_iclass == XED_ICLASS_INTO)          ||
+                       (xedd_iclass == XED_ICLASS_SYSENTER)      ||
+                       (xedd_iclass == XED_ICLASS_SYSEXIT)       ||
+                       (xedd_iclass == XED_ICLASS_VMLAUNCH)      ||
+                       (xedd_iclass == XED_ICLASS_VMRESUME)) {
+              insts[ no_insts ].cofi.type |= FAR_TRANSFER;
             }
 
-#if 0
-            if (1) {//if (xedd_category == XED_CATEGORY_CALL) {
-              fprintf(stdout,
-                      "\n%016llx :: %28s :: %16s %12s :: NO_OPS = %3u NO_MEM_OPS = %3u",
-                      addr,
-                      &xed_buffer[ 0u ],
-                      xed_category_enum_t2str(xedd_category),
-                      xed_iclass_enum_t2str(xedd_iclass),
-                      xedd_dec_no_ops,
-                      xedd_dec_no_mem_ops);
-              }
-#endif
-
-#if 0
-            fprintf(stdout, "\nINST ");
-            for (unsigned int i = 0u; i < n_bytes; i++) {
-              fprintf(stdout, "%02x ", inst_bytes[ i ]);
+            if ((insts[ no_insts ].cofi.type != 0u)                   &&
+                (insts[ no_insts ].cofi.type != COND_BRANCH)          &&
+                (insts[ no_insts ].cofi.type != UNCOND_DIRECT_BRANCH) &&
+                (insts[ no_insts ].cofi.type != INDIRECT_BRANCH)      &&
+                (insts[ no_insts ].cofi.type != FAR_TRANSFER)) {
+              fprintf(stderr, "Invalid COFI %u\n", insts[ no_insts ].cofi.type); for (;;) {}
             }
-            fprintf(stdout, "\n");
-#endif
-
             no_insts++;
           }
         } else if (xed_error == XED_ERROR_BUFFER_TOO_SHORT) {
@@ -472,7 +478,7 @@ xed_decode_inst:
     fprintf(stderr,
             "fopen(%s) failed :: %s\n",
             obj_file,
-            strerror(errno));
+            strerror(errno)); for (;;) {}
   }
 }
 
@@ -552,6 +558,7 @@ void xed_intel_pt_tip_disable(const double                 tsc,
   fprintf(branches_fp, "D :: %20.2lf\n", tsc);
 
   xed_reset_call_stack();
+  xed_reset_last_inst();
 }
 
 void xed_tid_switch(const double       tsc,
@@ -607,7 +614,10 @@ void xed_ptrace_uregs(const double                         tsc,
 #endif
       fprintf(branches_fp, "\e[0m\n");
 
-      if (i->cofi.type & COND_BRANCH) {
+      if (i->cofi.type == 0u) {
+        xed_update_last_inst(uregs->rip);
+        xed_process_branches(0u, 0u, 0llu, 0.0f, 0llu);
+      } else if (i->cofi.type & COND_BRANCH) {
         unsigned int tnt = 2u;
 
         switch (i->iclass) {
@@ -800,7 +810,7 @@ void xed_process_branches(const unsigned int           tnt,
       };
       tnt_queue_head              = tnt_queue_head_next;
     } else {
-      fprintf(stderr, "BR Queue full!\n"); for (;;) {}
+      fflush(branches_fp); fprintf(stderr, "BR Queue full!\n"); for (;;) {}
     }
   }
   if (tip != 0llu) {
@@ -814,7 +824,7 @@ void xed_process_branches(const unsigned int           tnt,
       };
       tip_queue_head              = tip_queue_head_next;
     } else {
-      fprintf(stderr, "TIP Queue full!\n"); for (;;) {}
+      fflush(branches_fp); fprintf(stderr, "TIP Queue full!\n"); for (;;) {}
     }
   }
 
@@ -830,13 +840,16 @@ void xed_process_branches(const unsigned int           tnt,
     if (insts[ last_inst ].cofi.type != 0u) {
 #endif
     sprintf(&branches_buffer[ 0u ],
-            "%10llu %8llx %16llx %16.16s %10s %12s",
+            "%10llu %8llx %16llx %16.16s %10s %12s [%02u %6u %6u %6u %6u]",
             branches_n,
             insts[ last_inst ].addr - insts[ last_inst ].base_addr,
             insts[ last_inst ].addr,
             insts[ last_inst ].binary,
             xed_category_enum_t2str(insts[ last_inst ].category),
-            xed_iclass_enum_t2str(insts[ last_inst ].iclass));
+            xed_iclass_enum_t2str(insts[ last_inst ].iclass),
+            insts[ last_inst ].cofi.type,
+            tnt_queue_head, tnt_queue_tail,
+            tip_queue_head, tip_queue_tail);
 #if defined(PRINT_XED_OPCODE)
     for (unsigned int j = 0u; j < 10u; j++) {
       const size_t k = strlen(&branches_buffer[ 0u ]);
@@ -912,6 +925,7 @@ void xed_process_branches(const unsigned int           tnt,
           if (call_stack_idx > call_stack_idx_max) {
             call_stack_idx_max = call_stack_idx;
           }
+          //fprintf(stdout, "%2u CALL %16llx -> %16llx\n", call_stack_idx, insts[ last_inst ].addr, insts[ last_inst + 1ll ].addr);
 
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
           fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ last_inst ].cofi.u.c.addr);
@@ -936,6 +950,7 @@ void xed_process_branches(const unsigned int           tnt,
             if (br != 0u) {
               if (call_stack_idx >= 1u) {
                 const unsigned long long int ret = call_stack[ --call_stack_idx ].ret;
+                //fprintf(stdout, "%2u  RET %16llx 0\n", call_stack_idx, ret);
 
                 x_tnt->tnt_len--;
 
@@ -967,11 +982,13 @@ void xed_process_branches(const unsigned int           tnt,
             if (call_stack_idx > call_stack_idx_max) {
               call_stack_idx_max = call_stack_idx;
             }
+            //fprintf(stdout, "%2u CALL %16llx -> %16llx\n", call_stack_idx, insts[ last_inst ].addr, insts[ last_inst + 1ll ].addr);
           } else if (insts[ last_inst ].category == XED_CATEGORY_UNCOND_BR) {
           } else if (insts[ last_inst ].category == XED_CATEGORY_RET) {
             if (call_stack_idx >= 1u) {
               call_stack_idx--;
             }
+            //fprintf(stdout, "%2u  RET %16llx 1\n", call_stack_idx, x_tip->tip);
           } else {
             // What to do in this case?!
           }
@@ -987,18 +1004,16 @@ void xed_process_branches(const unsigned int           tnt,
           return;
         }
       } else if ((insts[ last_inst ].cofi.type & FAR_TRANSFER) != 0u) {
-        if (insts[ last_inst ].category == XED_CATEGORY_CALL) {
-          fprintf(stdout, "FAR CALL\n"); for (;;) {}
-        } else if (insts[ last_inst ].category == XED_CATEGORY_RET) {
-          fprintf(stdout, "FAR RET\n"); for (;;) {}
-        }
-
+        if (x_tip != NULL) {
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-        fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ last_inst + 1ll ].addr);
+          fprintf(branches_fp, "%s -> %16llx T :: %20.2lf\n", &branches_buffer[ 0u ], x_tip->tip, x_tip->tsc);
 #endif
-        branches_n++;
-        last_inst++;
-        return;
+          branches_n++;
+          xed_update_last_inst(x_tip->tip);
+          tip_queue_tail = (tip_queue_tail + 1u) % TIP_QUEUE_LEN;
+        } else {
+          return;
+        }
       } else {
         fprintf(stderr, "Unknown cofi type\n"); for (;;) {}
       }
@@ -1011,9 +1026,19 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
     return NULL;
   }
 
-  signed long long int a = 0ll;
-  signed long long int b = ((signed long long int) (no_insts - 1llu));
-  signed long long int m;
+  signed long long int        a = 0ll;
+  signed long long int        b = ((signed long long int) (no_insts - 1llu));
+  static signed long long int m = 0ll;
+
+  if (m != 0ll) {
+    if ((insts[ m ].addr <= addr) && (addr <= insts[ m ].addr + insts[ m ].length - 1llu)) {
+      return &insts[ m ];
+    } else if (insts[ m ].addr < addr) {
+      a = m + 1ll;
+    } else {
+      b = m - 1ll;
+    }
+  }
 
   while (a <= b) {
     m = (a + b) / 2ll;
@@ -1065,10 +1090,12 @@ void xed_unwind_link_inst_and_dwarf(void) {
 
     insts[ i ].unwind = xed_unwind_find_dwarf(insts[ i ].addr + addr_offset);
     if (insts[ i ].unwind == NULL) {
+#if 0
       fprintf(stdout,
               "Unlinked unwind for instruction %16llx in %s\n",
               insts[ i ].addr - insts[ i ].base_addr,
               insts[ i ].binary);
+#endif
     }
   }
 }

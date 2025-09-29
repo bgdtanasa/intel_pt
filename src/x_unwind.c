@@ -10,7 +10,16 @@
 #define TASK_COMM_LEN (128u)
 #endif
 
+#if 1
+#define DO_STATS
+#endif
+
+#define CACHE_NO_BITS (16u)
+#define CACHE_MASK    ((1 << (CACHE_NO_BITS)) - 1u)
+#define CACHE_LENGTH  ((CACHE_MASK) + 1u)
+
 static FILE*                  unwind_fp;
+static const inst_t*          unwind_cache[ CACHE_LENGTH ];
 static unsigned long long int cfa_regs[ MAX_NO_REGS ];
 static char                   perfed_name[ TASK_COMM_LEN ];
 
@@ -51,9 +60,11 @@ void unwind(const int                            perfed_pid,
   unsigned long long int cfa;
   const inst_t*          inst;
   const dwarf_unwind_t*  unwind;
-#if 0
+#if defined(DO_STATS)
   struct timespec        a;
   struct timespec        b;
+  unsigned int           no_unwinds = 0u;
+  signed long long       c;
 #endif
 
   cfa_regs[  0u ] = ((unsigned long long int) (regs->rax));
@@ -80,16 +91,26 @@ void unwind(const int                            perfed_pid,
           perfed_pid,
           perfed_cpu,
           ((double) (read_tsc()) / ((double) (tsc_hz))));
-#if 0
+#if defined(DO_STATS)
   clock_gettime(CLOCK_MONOTONIC, &a);
 #endif
+  kmod_redo_kmaps();
 unwind_again:
-  inst   = xed_unwind_find_inst(cfa_regs[ 16u ]);
-  if (inst == NULL) {
-    if (cfa_regs[ 16u ] == 0llu) {
-      return;
-    }
+#if defined(DO_STATS)
+  no_unwinds++;
+#endif
+  if (cfa_regs[ 16u ] == 0llu) {
+    return;
+  }
+  if ((unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ] != NULL) &&
+      (unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ]->addr == cfa_regs[ 16u ])) {
+    inst = unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ];
+  } else {
+    inst = xed_unwind_find_inst(cfa_regs[ 16u ]);
 
+    unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ] = inst;
+  }
+  if (inst == NULL) {
     fprintf(unwind_fp, "Broken unwind R16 %16llx\n\n", cfa_regs[ 16u ]);
     //return;
     //unwind_close();
@@ -172,11 +193,14 @@ unwind_again:
     goto unwind_again;
   }
 unwind_done:
-#if 0
+#if defined(DO_STATS)
   clock_gettime(CLOCK_MONOTONIC, &b);
+  c = ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec));
   fprintf(stdout,
-          "unwind ts = %12lld ns\n",
-          ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec)));
+          "unwind ts = %5u %12lld ns :: %12.lf\n",
+          no_unwinds,
+          c,
+          ((double) (c)) / ((double) (no_unwinds)));
 #endif
   fprintf(unwind_fp, "\n");
 }

@@ -140,8 +140,8 @@ static int install_pmu(const __u64        config,
   struct perf_event_attr perf_attrs;
 
   memset(&perf_attrs, 0, sizeof(perf_attrs));
-  // 10 == /sys/devices/cpu_atom/type
-  perf_attrs.type           = 10u; //PERF_TYPE_RAW;
+  // 8 == /sys/devices/cpu_atom/type
+  perf_attrs.type           = 8u; //PERF_TYPE_RAW;
   perf_attrs.size           = sizeof(struct perf_event_attr);
   perf_attrs.config         = config;
   perf_attrs.sample_period  = (precise_ip == 1u) ? (PMU_PDIST_NO_PERIODS * PMU_PDIST_PERIOD) : (PMU_PERIOD);
@@ -152,7 +152,11 @@ static int install_pmu(const __u64        config,
                               PERF_SAMPLE_DATA_SRC;
   perf_attrs.read_format    = PERF_FORMAT_ID;
   perf_attrs.disabled       = 1;
+#if defined(EN_VMLINUZ)
+  perf_attrs.exclude_kernel = 0;
+#else
   perf_attrs.exclude_kernel = 1;
+#endif
   perf_attrs.exclude_idle   = 1;
   perf_attrs.precise_ip     = (precise_ip == 1u) ? (3u) : (2u);
   perf_attrs.sample_id_all  = 1;
@@ -190,6 +194,7 @@ static int install_pmu(const __u64        config,
 }
 
 void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt_fd) {
+  return;
   int cnt_fd;
 
   fprintf(stdout, "====== PMU ======\n");
