@@ -17,9 +17,8 @@
 #define PRINT_PMU
 #endif
 
-#define PMU_PDIST_PERIOD     (128llu)
-#define PMU_PDIST_NO_PERIODS (1llu)
-#define PMU_PERIOD           (1llu)
+#define PMU_PDIST_PERIOD (128llu)
+#define PMU_PERIOD       (1llu)
 
 #define FIXED_PMU_INST_RETIRED_ANY ((__u64) (0x00C0llu))
 
@@ -144,7 +143,7 @@ static int install_pmu(const __u64        config,
   perf_attrs.type           = 8u; //PERF_TYPE_RAW;
   perf_attrs.size           = sizeof(struct perf_event_attr);
   perf_attrs.config         = config;
-  perf_attrs.sample_period  = (precise_ip == 1u) ? (PMU_PDIST_NO_PERIODS * PMU_PDIST_PERIOD) : (PMU_PERIOD);
+  perf_attrs.sample_period  = (precise_ip == 1u) ? (PMU_PDIST_PERIOD) : (PMU_PERIOD);
   perf_attrs.sample_type    = PERF_SAMPLE_IP        |
                               PERF_SAMPLE_TID       |
                               PERF_SAMPLE_TIME      |
@@ -152,7 +151,7 @@ static int install_pmu(const __u64        config,
                               PERF_SAMPLE_DATA_SRC;
   perf_attrs.read_format    = PERF_FORMAT_ID;
   perf_attrs.disabled       = 1;
-#if defined(EN_VMLINUZ)
+#if defined(EN_VMLINUX)
   perf_attrs.exclude_kernel = 0;
 #else
   perf_attrs.exclude_kernel = 1;
@@ -194,7 +193,7 @@ static int install_pmu(const __u64        config,
 }
 
 void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt_fd) {
-  return;
+#if defined(EN_PMU)
   int cnt_fd;
 
   fprintf(stdout, "====== PMU ======\n");
@@ -213,6 +212,11 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
   fprintf(stdout, "====== PMU ======\n");
 
   (void) (cnt_fd);
+#else
+  (void) (perfed_pid);
+  (void) (perfed_cpu);
+  (void) (intel_pt_fd);
+#endif
 }
 
 void pmu_info(const unsigned long long int pmu_mask, FILE* fp) {

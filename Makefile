@@ -14,16 +14,24 @@ LIB_DIR=../xed/kits/$(XED_KIT)/lib
 
 CC=gcc
 CXX=gcc
-CFLAGS=$(INC_FLAGS) -DEN_RET_COMPRESSION -Wno-unused-result -flto -m64 -mavx -static -static-libgcc -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
+CPP_FLAGS=
+CPP_FLAGS+=-DEN_RET_COMPRESSION
+CPP_FLAGS+=-DEN_VMLINUX
+CPP_FLAGS+=-DEN_PMU
+CFLAGS=$(INC_FLAGS) $(CPP_FLAGS) -Wno-unused-result -flto -m64 -mavx -static -static-libgcc -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
 
 -include $(DEPS)
 
-.PHONY: all
-all: $(TARGET)
+.PHONY: all kmod_all
+all: $(TARGET) kmod_all
 
 $(TARGET): $(OBJECTS)
 	$(LINK.cc) $^ -flto -ggdb -static -static-libgcc -L$(LIB_DIR) -lxed -o $@
 
+kmod_all:
+	$(MAKE) -C kmod
+
 .PHONY: clean
 clean:
 	rm -f $(TARGET) $(OBJECTS) $(DEPS)
+	$(MAKE) -C kmod clean

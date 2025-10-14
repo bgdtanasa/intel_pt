@@ -147,6 +147,13 @@ extern void xed_process_branches(const unsigned int           tnt,
                                  const double                 tsc,
                                  const unsigned long long int cyc_cnt);
 
+extern void xed_async_reset(const unsigned long long int tip,
+                            const double                 tsc,
+                            const unsigned long long int cyc_cnt);
+extern void xed_async_enter(const unsigned long long int tip,
+                            const double                 tsc,
+                            const unsigned long long int cyc_cnt);
+
 extern const inst_t*         xed_unwind_find_inst(const unsigned long long int addr);
 extern const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr);
 extern void                  xed_unwind_link_inst_and_dwarf(void);

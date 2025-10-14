@@ -42,3 +42,14 @@ do
         echo "Invalid resource $l"
     fi
 done
+
+if [[ $2 == "vmlinux" ]];
+then
+    l="vmlinux"
+    a=$(basename $l)
+    echo "Generating resources for $l"
+    objdump -D -b binary -Matt,x86-64 -mi386 $l | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.$a
+    #llvm-dwarfdump --debug-frame $l | grep "  0x" | sort -k 1 -g > dwarf.$a
+    touch dwarf.$a
+    my_sed dwarf.$a
+fi

@@ -36,7 +36,7 @@
 #define DO_PTRACE
 #endif
 #if defined(DO_PTRACE)
-#if 1
+#if 0
 #define DO_UNWIND
 #endif
 #endif
@@ -50,7 +50,7 @@
 #define INTEL_PT_CONFIG_PT         ((__u64) (1llu <<  0llu))
 #define INTEL_PT_CONFIG_CYC        ((__u64) (1llu <<  1llu))
 #define INTEL_PT_CONFIG_PWR_EVT    ((__u64) (1llu <<  4llu))
-#define INTEL_PT_CONFIG_FUP_ON_PTW ((__u64) (0llu <<  5llu))
+#define INTEL_PT_CONFIG_FUP_ON_PTW ((__u64) (1llu <<  5llu))
 #define INTEL_PT_CONFIG_MTC        ((__u64) (1llu <<  9llu))
 #define INTEL_PT_CONFIG_TSC        ((__u64) (1llu << 10llu))
 #if defined(EN_RET_COMPRESSION)
@@ -58,7 +58,7 @@
 #else
 #define INTEL_PT_CONFIG_NORETCOMP  ((__u64) (1llu << 11llu))
 #endif
-#define INTEL_PT_CONFIG_PTW        ((__u64) (0llu << 12llu))
+#define INTEL_PT_CONFIG_PTW        ((__u64) (1llu << 12llu))
 #define INTEL_PT_CONFIG_BRANCH     ((__u64) (1llu << 13llu))
 #define INTEL_PT_CONFIG_MTC_PERIOD ((__u64) (0llu << 14llu))
 #define INTEL_PT_CONFIG_CYC_THRESH ((__u64) (0llu << 19llu))
@@ -283,6 +283,7 @@ static void perfed_msr(void) {
             fprintf(stdout, "\tMTCFreq   = %16llx\n", (msr_val >> 14llu) & 0x0Fllu);
             fprintf(stdout, "\tCycThresh = %16llx\n", (msr_val >> 19llu) & 0x0Fllu);
             fprintf(stdout, "\tPSBFreq   = %16llx\n", (msr_val >> 24llu) & 0x0Fllu);
+            fprintf(stdout, "\tEventEn   = %16llx\n", (msr_val >> 31llu) & 0x0Fllu);
             fprintf(stdout, "\tInjectPsb = %16llx\n", (msr_val >> 56llu) & 0x01llu);
         }
 #if 0
@@ -888,7 +889,7 @@ static void perfed_setup(void) {
         perf_attrs.disabled       = 1;
         //perf_attrs.pinned         = 1;
         //perf_attrs.exclusive      = 1;
-#if defined(EN_VMLINUZ)
+#if defined(EN_VMLINUX)
         perf_attrs.exclude_kernel = 0;
 #else
         perf_attrs.exclude_kernel = 1;
@@ -1096,6 +1097,7 @@ int main(int argc, char *argv[ ]) {
             fprintf(stdout, "\tIP Filtering Support  = %02x\n", (ebx >> 2u) & 0x01u);
             fprintf(stdout, "\tMTC Support           = %02x\n", (ebx >> 3u) & 0x01u);
             fprintf(stdout, "\tPTWRITE Support       = %02x\n", (ebx >> 4u) & 0x01u);
+            fprintf(stdout, "\tEvent Trace Support   = %02x\n", (ebx >> 7u) & 0x01u);
             fprintf(stdout, "\tTNT Disable Support   = %02x\n", (ebx >> 8u) & 0x01u);
             // Leaf 14H :: ECX = 1
             eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;

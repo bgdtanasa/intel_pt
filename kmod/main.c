@@ -188,6 +188,7 @@ static int do_kmaps(void) {
     unsigned long     e_brk       = perfed_mm->brk;
 
     printk(KERN_INFO "HEAP :: %016lx %16lx", s_brk, e_brk);
+    printk(KERN_INFO " PGD :: %016lx", __pa(perfed_mm->pgd));
     no_pages = 0u;
     if (perfed_mm != NULL) {
       struct vm_area_struct* perfed_vma;

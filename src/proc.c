@@ -148,10 +148,10 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
                 break;
             }
         }
-#if defined(EN_VMLINUZ)
-        fprintf(stdout, "%64s %08llx %u :: ", "vmlinux", 0xffffffff81000000llu, 0u);
-        parse_dwarf("vmlinux", 0xffffffff81000000llu);
-        parse_objdump(perfed_pid, "vmlinux", 0xffffffff81000000llu);
+#if defined(EN_VMLINUX)
+        fprintf(stdout, "%64s %08llx %u :: ", "vmlinux", VMLINUX_BASE_ADDR, 0u);
+        parse_dwarf("vmlinux", VMLINUX_BASE_ADDR);
+        parse_objdump(perfed_pid, "vmlinux", VMLINUX_BASE_ADDR);
 #endif
         fprintf(stdout, "====== PROC ======\n");
 
