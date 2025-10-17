@@ -76,6 +76,39 @@ pfn_again:
     close(fd_kpageflags);
 }
 
+#if defined(EN_VMLINUX)
+static void update_modules(void) {
+    FILE* fp = fopen("resources/modules_addrs", "r");
+
+    if (fp != NULL) {
+        unsigned long long int a;
+        unsigned long long int b;
+        char                   name[ 128u ];
+
+        fprintf(stdout, "====== KERNEL MODULES ======\n");
+        for (;;) {
+            const int n = fscanf(fp, "%s %llx %llx\n", &name[ 0u ], &a, &b);
+
+            fprintf(stdout, "%llx %llx %64s\n", a, b, &name[ 0u ]);
+            if (n == 3) {
+                const char* binary = parse_get_binary(&name[ 0u ], 1u);
+
+                for (unsigned long long int i = 0llu; i < no_insts; i++) {
+                    if ((a <= insts[ i ].addr) && (insts[ i ].addr < b)) {
+                        insts[ i ].binary    = binary;
+                        insts[ i ].base_addr = a;
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        fprintf(stdout, "====== KERNEL MODULES ======\n");
+        fclose(fp);
+    }
+}
+#endif
+
 void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
     FILE* fp;
 
@@ -148,12 +181,16 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
                 break;
             }
         }
-#if defined(EN_VMLINUX)
-        fprintf(stdout, "%64s %08llx %u :: ", "vmlinux", VMLINUX_BASE_ADDR, 0u);
-        parse_dwarf("vmlinux", VMLINUX_BASE_ADDR);
-        parse_objdump(perfed_pid, "vmlinux", VMLINUX_BASE_ADDR);
-#endif
         fprintf(stdout, "====== PROC ======\n");
+#if defined(EN_VMLINUX)
+        fprintf(stdout, "====== KERNEL ======\n");
+        fprintf(stdout, "%64s %08llx %u :: ", "vmlinux", 0llu, 0u);
+        parse_dwarf("vmlinux", 0llu);
+        parse_objdump(perfed_pid, "vmlinux", 0llu);
+        fprintf(stdout, "====== KERNEL ======\n");
+
+        update_modules();
+#endif
 
         xed_unwind_link_inst_and_dwarf();
         fclose(fp);
@@ -161,7 +198,7 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
         fprintf(stderr,
                 "fopen(%s) failed :: %s\n",
                 &buffer[ 0u ],
-                strerror(errno));
+                strerror(errno)); for (;;) {}
     }
 }
 

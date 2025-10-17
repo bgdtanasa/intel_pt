@@ -45,11 +45,40 @@ done
 
 if [[ $2 == "vmlinux" ]];
 then
+    rm -rf vmlinux_addrs
+    rm -rf modules_list
+    rm -rf modules_addrs
+
+    grep "[tT] " /proc/kallsyms | sort -k 1 > vmlinux_addrs
+    STEXT=$(grep _stext vmlinux_addrs | awk '{print $1}')
+    ETEXT=$(grep _etext vmlinux_addrs | awk '{print $1}')
+    START_ADDR=${STEXT}
+    STOP_ADDR=$(tail -n 1 vmlinux_addrs | awk '{print $1}')
+    echo "vmlinux ${STEXT} ${ETEXT}" >> modules_addrs
+
     l="vmlinux"
     a=$(basename $l)
     echo "Generating resources for $l"
-    objdump -D -b binary -Matt,x86-64 -mi386 $l | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.$a
-    #llvm-dwarfdump --debug-frame $l | grep "  0x" | sort -k 1 -g > dwarf.$a
+    objdump -d --start-address=0x${START_ADDR} --stop-address=0x${STOP_ADDR} /proc/kcore | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.$a
     touch dwarf.$a
-    my_sed dwarf.$a
+
+    awk '{
+        for (i = 1; i <= NF; i++) {
+            if (($i == "Live") && ((i + 1) <= NF)) {
+                printf("%16s %s\n", $(i + 1), $1)
+                break
+            }
+        }
+    }' /proc/modules | sort -k 1 > modules_list
+
+    while read -r A M;
+    do
+        grep "\[$M\]" vmlinux_addrs > vmlinux_addrs_${M}
+
+        A=$(head -n 1 vmlinux_addrs_${M} | awk '{print $1}')
+        B=$(tail -n 1 vmlinux_addrs_${M} | awk '{print $1}')
+
+        echo "$M $A $B" >> modules_addrs
+        rm -rf vmlinux_addrs_${M}
+    done < modules_list
 fi

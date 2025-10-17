@@ -106,8 +106,9 @@ typedef struct {
   const dwarf_unwind_t*  unwind;
 } inst_t;
 
-extern dwarf_unwind_t* unwinds;
-extern inst_t*         insts;
+extern dwarf_unwind_t*    unwinds;
+extern inst_t*            insts;
+extern unsigned long long no_insts;
 
 extern const char* parse_get_binary(const char* const xed_file, const unsigned int add_file);
 extern void        parse_dwarf(const char* const xed_file, const unsigned long long int base_addr);

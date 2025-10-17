@@ -29,7 +29,7 @@
 
 #define MAX_NO_DWARF_UNWINDS (5000000llu)
 #define MAX_NO_INSTS         (50000000llu)
-#define MAX_NO_BINARIES      (250u)
+#define MAX_NO_BINARIES      (512u)
 #define CALL_STACK_LEN       (1u * 256u)
 #define TNT_QUEUE_LEN        (1u * 1024u)
 #define TIP_QUEUE_LEN        (1u * 1024u)
@@ -67,11 +67,11 @@ typedef struct {
   unsigned int     tip_queue_tail;
 } ctx_t;
 
-dwarf_unwind_t* unwinds;
-inst_t*         insts;
+dwarf_unwind_t*    unwinds;
+inst_t*            insts;
+unsigned long long no_insts;
 
 static unsigned long long  no_unwinds;
-static unsigned long long  no_insts;
 static xed_chip_features_t chip_features;
 
 static unsigned int no_binaries;
@@ -1174,7 +1174,12 @@ const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr) {
 void xed_unwind_link_inst_and_dwarf(void) {
   for (unsigned long long int i = 0llu; i < no_insts - 1llu; i++) {
     if (insts[ i ].addr > insts[ i + 1llu ].addr) {
-      fprintf(stderr, "Unsorted instructions\n"); for (;;) {}
+      fprintf(stderr,
+              "Unsorted instructions %s %s :: %16llx %16llx\n",
+              insts[ i ].binary,
+              insts[ i + 1llu ].binary,
+              insts[ i ].addr,
+              insts[ i + 1llu ].addr); for (;;) {}
     }
   }
   for (unsigned long long int i = 0llu; i < no_insts; i++) {

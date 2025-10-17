@@ -32,15 +32,15 @@
 #include "kmod.h"
 #include "x_unwind.h"
 
-#if 0
+#if 1
 #define DO_PTRACE
 #endif
 #if defined(DO_PTRACE)
-#if 0
+#if 1
 #define DO_UNWIND
 #endif
 #endif
-#if 0
+#if 1
 #define PRINT_RECORD
 #endif
 
@@ -85,7 +85,7 @@
 
 #define MMAP_DATA_NO_PAGES (12llu)
 #define MMAP_SIZE          ((1llu + (1llu << (MMAP_DATA_NO_PAGES))) * (ONE_PAGE))
-#define MMAP_AUX_NO_PAGES  (17llu)
+#define MMAP_AUX_NO_PAGES  (18llu)
 #define MMAP_AUX_SIZE      ((1llu << (MMAP_AUX_NO_PAGES)) * (ONE_PAGE))
 
 #define DATA_BUFFER_SIZE (N_MB(2llu))

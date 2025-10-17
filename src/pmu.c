@@ -45,6 +45,7 @@ typedef struct {
 
 static pmu_t pmus[ 64u ];
 
+#if defined(EN_PMU)
 static const char* get_pmu_name(const __u64 config) {
   switch (config) {
     case FIXED_PMU_INST_RETIRED_ANY: {
@@ -191,6 +192,7 @@ static int install_pmu(const __u64        config,
 
   return pmu_fd;
 }
+#endif
 
 void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt_fd) {
 #if defined(EN_PMU)

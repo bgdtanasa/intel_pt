@@ -5,10 +5,6 @@
 
 #define MAX_NO_AMAPS (512u)
 
-#if defined(EN_VMLINUX)
-#define VMLINUX_BASE_ADDR (0xFFFFFFFF81000000llu)
-#endif
-
 typedef struct {
   unsigned long long int a;
   unsigned long long int b;

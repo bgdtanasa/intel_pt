@@ -25,7 +25,7 @@ void kmod_load(const int perfed_pid) {
     fprintf(stderr,
             "open(%s) failed :: %s\n",
             module_name,
-            strerror(errno));
+            strerror(errno)); for (;;) {}
   } else {
     long ret;
 
@@ -44,7 +44,7 @@ void kmod_load(const int perfed_pid) {
       if (my_char_fd == -1) {
         fprintf(stderr,
                 "open(/dev/my_char-0) failed :: %s\n",
-                strerror(errno));
+                strerror(errno)); for (;;) {}
       }
       fprintf(stdout,
               "my_char_fd = %d no_kmaps = %lu no_new_a_maps = %2u\n",
@@ -55,7 +55,7 @@ void kmod_load(const int perfed_pid) {
       fprintf(stderr,
               "finit_module(%s) failed :: %s\n",
               module_name,
-              strerror(errno));
+              strerror(errno)); for (;;) {}
     }
     close(fd);
   }
