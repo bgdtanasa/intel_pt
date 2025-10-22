@@ -31,6 +31,10 @@
 #define INDIRECT_BRANCH      (1u << 2u)
 #define FAR_TRANSFER         (1u << 3u)
 
+#define MAX_NO_UNWINDS  (5000000llu)
+#define MAX_NO_BINARIES (512u)
+#define MAX_NO_INSTS    (50000000llu)
+
 typedef enum {
   CFA_RULE_NONE,
   CFA_RULE_REG,
@@ -107,6 +111,9 @@ typedef struct {
 } inst_t;
 
 extern dwarf_unwind_t*    unwinds;
+extern unsigned long long no_unwinds;
+extern char               binaries[ MAX_NO_BINARIES ][ 250u ];
+extern unsigned int       no_binaries;
 extern inst_t*            insts;
 extern unsigned long long no_insts;
 

@@ -89,10 +89,10 @@ static void update_modules(void) {
         for (;;) {
             const int n = fscanf(fp, "%s %llx %llx\n", &name[ 0u ], &a, &b);
 
-            fprintf(stdout, "%llx %llx %64s\n", a, b, &name[ 0u ]);
             if (n == 3) {
                 const char* binary = parse_get_binary(&name[ 0u ], 1u);
 
+                fprintf(stdout, "%llx %llx %64s :: no_binaries = %9u\n", a, b, &name[ 0u ], no_binaries);
                 for (unsigned long long int i = 0llu; i < no_insts; i++) {
                     if ((a <= insts[ i ].addr) && (insts[ i ].addr < b)) {
                         insts[ i ].binary    = binary;

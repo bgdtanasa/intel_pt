@@ -27,15 +27,12 @@
 #define SF(eflags) ((eflags >>  7llu) & 0x01llu)
 #define OF(eflags) ((eflags >> 11llu) & 0x01llu)
 
-#define MAX_NO_DWARF_UNWINDS (5000000llu)
-#define MAX_NO_INSTS         (50000000llu)
-#define MAX_NO_BINARIES      (512u)
 #define CALL_STACK_LEN       (1u * 256u)
 #define TNT_QUEUE_LEN        (1u * 1024u)
 #define TIP_QUEUE_LEN        (1u * 1024u)
 
 typedef struct {
-  unsigned long long int ret;
+  const inst_t* ret;
 } call_stack_t;
 
 typedef struct {
@@ -56,7 +53,6 @@ typedef struct {
 
   call_stack_t     call_stack[ CALL_STACK_LEN ];
   unsigned int     call_stack_idx;
-  unsigned int     call_stack_idx_max;
 
   tnt_t            tnt_queue[ TNT_QUEUE_LEN ];
   unsigned int     tnt_queue_head;
@@ -68,14 +64,11 @@ typedef struct {
 } ctx_t;
 
 dwarf_unwind_t*    unwinds;
+unsigned long long no_unwinds;
+char               binaries[ MAX_NO_BINARIES ][ 250u ];
+unsigned int       no_binaries;
 inst_t*            insts;
 unsigned long long no_insts;
-
-static unsigned long long  no_unwinds;
-static xed_chip_features_t chip_features;
-
-static unsigned int no_binaries;
-static char         binaries[ MAX_NO_BINARIES ][ 250u ];
 
 static ctx_t        ctx[ 10u ] = {
   [ 0u ] = {
@@ -118,8 +111,26 @@ static unsigned long long int branches_n_en;
 static double                 branches_tsc_en;
 static unsigned long long int branches_cyc_cnt_en;
 
+static xed_chip_features_t chip_features;
+
 extern double tsc_factor;
 extern double cbr_factor;
+
+static void xed_print_stack(void) {
+#if 0
+  for (unsigned int i = 0u; i <= ctx_idx; i++) {
+    for (unsigned int j = 0u; j < ctx[ i ].call_stack_idx; j++) {
+      fprintf(stdout,
+              "%2u %016llx %08llx_%s\n",
+              i,
+              ctx[ i ].call_stack[ j ].inst->addr,
+              ctx[ i ].call_stack[ j ].inst->addr - ctx[ i ].call_stack[ j ].inst->base_addr,
+              ctx[ i ].call_stack[ j ].inst->binary);
+    }
+  }
+  fprintf(stdout, "\n");
+#endif
+}
 
 const char* parse_get_binary(const char* const xed_file, const unsigned int add_file) {
   for (unsigned int i = 0u; i < no_binaries; i++) {
@@ -257,7 +268,7 @@ reg_again:
           goto reg_again;
         }
 
-        if (no_unwinds >= MAX_NO_DWARF_UNWINDS) {
+        if (no_unwinds >= MAX_NO_UNWINDS) {
           fprintf(stderr, "Not enough space to load the unwinds\n"); for (;;) {}
         }
         memcpy(&unwinds[ no_unwinds ].regs[ 0u ], &regs[ 0u ], sizeof(regs));
@@ -525,11 +536,11 @@ xed_decode_inst:
 void perfed_xed(const int perfed_pid) {
   (void) perfed_pid;
 
-  unwinds = malloc(MAX_NO_DWARF_UNWINDS * sizeof(dwarf_unwind_t));
+  unwinds = malloc(MAX_NO_UNWINDS * sizeof(dwarf_unwind_t));
   if (unwinds == NULL) {
     fprintf(stderr, "malloc failed\n"); for (;;) {}
   } else {
-    fprintf(stdout, "unwinds size = %4llu MB\n", (MAX_NO_DWARF_UNWINDS * sizeof(inst_t)) / 1024llu / 1024llu);
+    fprintf(stdout, "unwinds size = %4llu MB\n", (MAX_NO_UNWINDS * sizeof(inst_t)) / 1024llu / 1024llu);
   }
   insts = malloc(MAX_NO_INSTS * sizeof(inst_t));
   if (insts == NULL) {
@@ -786,8 +797,7 @@ void xed_ptrace_uregs(const double                         tsc,
 }
 
 void xed_reset_call_stack(void) {
-  this_ctx->call_stack_idx     = 0u;
-  this_ctx->call_stack_idx_max = 0u;
+  this_ctx->call_stack_idx = 0u;
 }
 
 void xed_reset_last_inst(void) {
@@ -871,7 +881,7 @@ void xed_process_branches(const unsigned int           tnt,
   }
 
 #if !defined(PRINT_XED) && !defined(PRINT_XED_BRANCHES_ONLY)
-  fprintf(branches_fp, "%16llx\n", insts[ last_inst ].addr);
+  fprintf(branches_fp, "%16llx\n", insts[ this_ctx->last_inst ].addr);
 #endif
   for (;;) {
     if (this_ctx->last_inst == -1ll) {
@@ -879,7 +889,7 @@ void xed_process_branches(const unsigned int           tnt,
     }
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
 #if defined(PRINT_XED_BRANCHES_ONLY)
-    if (insts[ last_inst ].cofi.type != 0u) {
+    if (insts[ this_ctx->last_inst ].cofi.type != 0u) {
 #endif
     sprintf(&branches_buffer[ 0u ],
             "%10llu %8llx %16llx %16.16s %10s %12s [%u %02u %6u %6u %6u %6u]",
@@ -897,8 +907,8 @@ void xed_process_branches(const unsigned int           tnt,
     for (unsigned int j = 0u; j < 10u; j++) {
       const size_t k = strlen(&branches_buffer[ 0u ]);
 
-      if (j < insts[ last_inst ].length) {
-        sprintf(&branches_buffer[ k ], " %02x", ((unsigned int) (insts[ last_inst ].bytes[ j ])));
+      if (j < insts[ this_ctx->last_inst ].length) {
+        sprintf(&branches_buffer[ k ], " %02x", ((unsigned int) (insts[ this_ctx->last_inst ].bytes[ j ])));
       } else {
         sprintf(&branches_buffer[ k ], "   ");
       }
@@ -944,7 +954,7 @@ void xed_process_branches(const unsigned int           tnt,
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
             fprintf(branches_fp, "%s -> %16llx 1 :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].cofi.u.j.addr, x_tnt->tsc);
 #else
-            fprintf(branches_fp, "%16llx 1 :: %20.2lf\n", insts[ last_inst ].cofi.u.j.addr, x_tnt->tsc);
+            fprintf(branches_fp, "%16llx 1 :: %20.2lf\n", insts[ this_ctx->last_inst ].cofi.u.j.addr, x_tnt->tsc);
 #endif
             branches_n++;
             xed_update_last_inst(insts[ this_ctx->last_inst ].cofi.u.j.addr);
@@ -952,7 +962,7 @@ void xed_process_branches(const unsigned int           tnt,
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
             fprintf(branches_fp, "%s -> %16llx 0 :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst + 1ll ].addr, x_tnt->tsc);
 #else
-            fprintf(branches_fp, "%16llx 0 :: %20.2lf\n", insts[ last_inst + 1ll ].addr, x_tnt->tsc);
+            fprintf(branches_fp, "%16llx 0 :: %20.2lf\n", insts[ this_ctx->last_inst + 1ll ].addr, x_tnt->tsc);
 #endif
             branches_n++;
             this_ctx->last_inst++;
@@ -963,11 +973,9 @@ void xed_process_branches(const unsigned int           tnt,
       } else if ((insts[ this_ctx->last_inst ].cofi.type & UNCOND_DIRECT_BRANCH) != 0u) {
         if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_CALL) {
           this_ctx->call_stack[ this_ctx->call_stack_idx++ ] = (call_stack_t) {
-            .ret = insts[ this_ctx->last_inst + 1ll ].addr
+            .ret = &insts[ this_ctx->last_inst + 1ll ]
           };
-          if (this_ctx->call_stack_idx > this_ctx->call_stack_idx_max) {
-            this_ctx->call_stack_idx_max = this_ctx->call_stack_idx;
-          }
+          xed_print_stack();
           //fprintf(stdout, "%u %2u CALL %16llx -> %16llx\n", ctx_idx, this_ctx->call_stack_idx, insts[ this_ctx->last_inst ].addr, insts[ this_ctx->last_inst + 1ll ].addr);
 
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
@@ -992,15 +1000,15 @@ void xed_process_branches(const unsigned int           tnt,
 
             if (br != 0u) {
               if (this_ctx->call_stack_idx >= 1u) {
-                const unsigned long long int ret = this_ctx->call_stack[ --this_ctx->call_stack_idx ].ret;
+                const unsigned long long int ret = this_ctx->call_stack[ --this_ctx->call_stack_idx ].ret->addr;
                 //fprintf(stdout, "%u %2u  RET %16llx 0\n", ctx_idx, this_ctx->call_stack_idx, ret);
 
                 x_tnt->tnt_len--;
 
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-                fprintf(branches_fp, "%s -> %16llx 1 :: %20.2lf %8u\n", &branches_buffer[ 0u ], ret, x_tnt->tsc, this_ctx->call_stack_idx_max);
+                fprintf(branches_fp, "%s -> %16llx 1 :: %20.2lf\n", &branches_buffer[ 0u ], ret, x_tnt->tsc);
 #else
-                fprintf(branches_fp, "%16llx 1 :: %20.2lf %8u\n", ret, x_tnt->tsc, this_ctx->call_stack_idx_max);
+                fprintf(branches_fp, "%16llx 1 :: %20.2lf\n", ret, x_tnt->tsc);
 #endif
                 branches_n++;
                 xed_update_last_inst(ret);
@@ -1020,11 +1028,9 @@ void xed_process_branches(const unsigned int           tnt,
 
           if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_CALL) {
             this_ctx->call_stack[ this_ctx->call_stack_idx++ ] = (call_stack_t) {
-              .ret = insts[ this_ctx->last_inst + 1ll ].addr
+              .ret = &insts[ this_ctx->last_inst + 1ll ]
             };
-            if (this_ctx->call_stack_idx > this_ctx->call_stack_idx_max) {
-              this_ctx->call_stack_idx_max = this_ctx->call_stack_idx;
-            }
+            xed_print_stack();
             //fprintf(stdout, "%u %2u CALL %16llx -> %16llx\n", ctx_idx, this_ctx->call_stack_idx, insts[ this_ctx->last_inst ].addr, insts[ this_ctx->last_inst + 1ll ].addr);
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_UNCOND_BR) {
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_RET) {

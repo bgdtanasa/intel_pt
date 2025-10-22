@@ -65,7 +65,9 @@ then
     awk '{
         for (i = 1; i <= NF; i++) {
             if (($i == "Live") && ((i + 1) <= NF)) {
-                printf("%16s %s\n", $(i + 1), $1)
+                if ($(i + 1) != "0x0000000000000000") {
+                    printf("%16s %s\n", $(i + 1), $1)
+                }
                 break
             }
         }

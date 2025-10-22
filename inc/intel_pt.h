@@ -1,7 +1,7 @@
 #ifndef _INTEL_PT_
 #define _INTEL_PT_
 
-#if 1
+#if 0
 #define AUX_DBG
 #endif
 

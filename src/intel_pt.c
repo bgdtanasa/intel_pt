@@ -1125,6 +1125,8 @@ cyc_again:
       unsigned int       p_one     = 0u;
       const unsigned int short_tnt = ((unsigned int) (x[ 0u ]));
 
+      record_intel_pt_pkt(INTEL_PT_PKT_SHORT_TNT, ((unsigned long long int) (short_tnt)), cyc_cnt_ref, x, n);
+
       asm volatile ("bsr %1, %0": "=r"(p_one) : "r"(short_tnt) : );
       xed_process_branches((short_tnt >> 1u) & ((1u << (p_one - 1u)) - 1u),
                            p_one - 1u,
@@ -1139,7 +1141,6 @@ cyc_again:
               p_one - 1u);
 #endif
 
-      record_intel_pt_pkt(INTEL_PT_PKT_SHORT_TNT, ((unsigned long long int) (short_tnt)), cyc_cnt_ref, x, n);
       x += 1llu;
       n -= 1llu;
       goto decode_again;
