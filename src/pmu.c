@@ -17,6 +17,12 @@
 #define PRINT_PMU
 #endif
 
+#if defined(EN_PMU)
+#if 0
+define EN_GEN_PMU
+#endif
+#endif
+
 #define PMU_PDIST_PERIOD (128llu)
 #define PMU_PERIOD       (1llu)
 
@@ -203,6 +209,7 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
   cnt_fd = install_pmu(FIXED_PMU_INST_RETIRED_ANY,            1u, perfed_pid, perfed_cpu, intel_pt_fd);
 
   // General counters
+#if defined(EN_GEN_PMU)
   //cnt_fd = install_pmu(GEN_PMU_BR_INST_RETIRED_ALL_BRANCHES,  1u, perfed_pid, perfed_cpu, intel_pt_fd);
   //cnt_fd = install_pmu(GEN_PMU_BR_MISP_RETIRED_ALL_BRANCHES,  0u, perfed_pid, perfed_cpu, intel_pt_fd);
   cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L1_MISS,  1u, perfed_pid, perfed_cpu, intel_pt_fd);
@@ -211,6 +218,7 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
   cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L2_HIT,   0u, perfed_pid, perfed_cpu, intel_pt_fd);
   cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_DRAM_HIT, 0u, perfed_pid, perfed_cpu, intel_pt_fd);
   cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L3_HIT,   0u, perfed_pid, perfed_cpu, intel_pt_fd);
+#endif
   fprintf(stdout, "====== PMU ======\n");
 
   (void) (cnt_fd);

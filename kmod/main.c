@@ -17,7 +17,7 @@
 
 #include <uapi/linux/mman.h>
 
-#define MAX_NO_PAGES (200000u)
+#define MAX_NO_PAGES (500000u)
 #define MY_DEV_NAME  "my_char"
 
 typedef struct __attribute__ ((__packed__)) {

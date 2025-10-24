@@ -213,6 +213,7 @@ static inline __attribute__((always_inline)) double tsc_approx(void) {
 #if defined(PRINT_PT)
       fprintf(stdout, "\e[0;31mTSC_ERR       = %20.2lf\e[0m\n", tsc_approx_ref - tsc_approx_ref_prev);
 #endif
+      xed_tsc_err(tsc_approx_ref - tsc_approx_ref_prev);
     }
     tsc_approx_ref_prev = tsc_approx_ref;
   }
@@ -616,6 +617,7 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
     }
   } else {
     xed_intel_pt_tip_disable(tsc_approx_ref, cyc_cnt_ref);
+    xed_async_reset(ip, tsc_approx_ref, cyc_cnt_ref);
 
     if (pkt_type != INTEL_PT_PKT_TIP_PGD) {
       fprintf(stderr, "ip_decode error :: 2 ip = %16llx pkt_type = %3d\n", ip, pkt_type); for (;;) { }
@@ -988,9 +990,7 @@ decode_again:
         fprintf(stdout, "FUP BEP       = %20llx\n", fup);
 #endif
 
-        if (bip_pmu_mask != 0llu) {
-          xed_intel_pt_bip_fup(bip_ip, fup, bip_tsc, bip_pmu_mask, bip_mem_access_addr);
-        }
+        xed_intel_pt_bip_fup(bip_ip, fup, bip_tsc, bip_pmu_mask, bip_mem_access_addr);
         bip_ip       = 0llu;
         bip_pmu_mask = 0llu;
         bip_tsc      = 0llu;
