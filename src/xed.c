@@ -926,9 +926,6 @@ void xed_process_branches(const unsigned int           tnt,
     }
   }
 
-#if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-  fprintf(branches_fp, "%16llx\n", insts[ this_ctx->last_inst ].addr);
-#endif
   for (;;) {
     if (this_ctx->last_inst == -1ll) {
       break;
@@ -1199,11 +1196,12 @@ void xed_async_enter(const unsigned long long int tip,
   fprintf(branches_fp, "Async Enter :: %20.2lf %16llx\n", tsc, tip);
 }
 
-void xed_tsc_err(const double tsc_err) {
+void xed_tsc_err(const double tsc_err, const unsigned int no_tsc_errs) {
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-  fprintf(branches_fp, "TSC_ERR :: %20.2lf\n", tsc_err);
+  fprintf(branches_fp, "TSC_ERR :: %20.2lf %6u\n", tsc_err, no_tsc_errs);
 #else
   (void) (tsc_err);
+  (void) (no_tsc_errs);
 #endif
 }
 

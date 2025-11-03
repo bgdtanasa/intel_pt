@@ -200,22 +200,15 @@ double tsc_factor;
 double base_factor;
 double cbr_factor;
 
+static const intel_pt_pkt_t* mtc_ref;
+static unsigned int          no_tsc_errs;
+static double                tsc_approx_ref_prev;
+
 static inline __attribute__((always_inline)) double tsc_approx(void) {
   if ((tsc_ref == 0.0f) || (cbr_factor == 0.0f)) {
     tsc_approx_ref = 0.0f;
   } else {
-    static double tsc_approx_ref_prev = 0.0f;
-
-    tsc_approx_ref = tsc_ref +
-                     tsc_approx_ctc +
-                     ((double) (tsc_approx_fc * base_factor)) / ((double) (cbr_factor));
-    if (tsc_approx_ref < tsc_approx_ref_prev) {
-#if defined(PRINT_PT)
-      fprintf(stdout, "\e[0;31mTSC_ERR       = %20.2lf\e[0m\n", tsc_approx_ref - tsc_approx_ref_prev);
-#endif
-      xed_tsc_err(tsc_approx_ref - tsc_approx_ref_prev);
-    }
-    tsc_approx_ref_prev = tsc_approx_ref;
+    tsc_approx_ref = tsc_ref + tsc_approx_ctc + ((double) (tsc_approx_fc * base_factor)) / ((double) (cbr_factor));
   }
 
   return tsc_approx_ref;
@@ -368,8 +361,6 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
                                 const volatile unsigned char* x __attribute__((unused)),
                                 unsigned long long int        n __attribute__((unused))) {
 #endif
-  static const intel_pt_pkt_t* mtc_ref = NULL;
-
   const unsigned int a = is_cyc_eligible(type);
   const unsigned int b = (type == INTEL_PT_PKT_TSC_MTC) ? (1u) : (0u);
 
@@ -382,41 +373,45 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
         unsigned long long int ctc_ovf = 0llu;
         unsigned long long int ctc     = val;
 
-        ctc_ovf = (ctc < (mtc_ref->v.ctc & 0x00FFllu)) ? (1llu) : (0llu);
+        ctc_ovf = (ctc <= (mtc_ref->v.ctc & 0x00FFllu)) ? (1llu) : (0llu);
         ctc     = ((mtc_ref->v.ctc & 0xFFFFFFFFFFFFFF00llu) | ctc) + (ctc_ovf << 8llu);
         val     = ctc;
 
-        tsc_approx_ctc = ((double) ((ctc - tsc_ref_ctc) * tsc_ratio));
-        tsc_approx_fc  = cyc_cnt - mtc_ref->cyc_cnt;
+        tsc_approx_ctc  = ((double) ((ctc - tsc_ref_ctc) * tsc_ratio));
+        tsc_approx_fc  += cyc_cnt - mtc_ref->cyc_cnt;
       } else {
         tsc_approx_ctc  = tsc_approx_ctc;
         tsc_approx_fc  += cyc_cnt - mtc_ref->cyc_cnt;
       }
+    } else {
+      tsc_approx_ctc = 0.0f;
+      tsc_approx_fc  = 0llu;
     }
   }
-  if (a == 1u) {
 #if defined(PRINT_PT)
-    fprintf(stdout,
-            PRINT_FORMAT "%16.2lf %16llu %20.2lf :: %16llu\n",
-            intel_pt_pkt_names[ type ],
-            tsc_approx_ctc,
-            tsc_approx_fc,
-            tsc_approx(),
-            cyc_cnt_ref);
+  fprintf(stdout,
+          PRINT_FORMAT "%16.2lf %16llu %20.2lf :: %16llu\n",
+          intel_pt_pkt_names[ type ],
+          tsc_approx_ctc,
+          tsc_approx_fc,
+          tsc_approx(),
+          cyc_cnt_ref);
 #else
-    tsc_approx();
+  tsc_approx();
 #endif
-  } else {
+
+  if (tsc_approx_ref < tsc_approx_ref_prev) {
 #if defined(PRINT_PT)
-    fprintf(stdout,
-            PRINT_FORMAT "%16s %16s %20s :: %16llu\n",
-            intel_pt_pkt_names[ type ],
-            "",
-            "",
-            "",
-            cyc_cnt_ref);
+    fprintf(stdout, "\e[0;31mTSC_ERR       = %20.2lf\e[0m\n", tsc_approx_ref - tsc_approx_ref_prev);
 #endif
+    xed_tsc_err(tsc_approx_ref - tsc_approx_ref_prev, ++no_tsc_errs);
+    tsc_ref += tsc_approx_ref_prev - tsc_approx_ref + 1.0f;
+    tsc_approx();
   }
+  tsc_approx_ref_prev = tsc_approx_ref;
+  //if (no_tsc_errs >= 1u) {
+  //  print_intel_pt_pkts(); for (;;) {}
+  //}
 
   intel_pt_pkt_hist[ intel_pt_pkt_hist_idx ] = (intel_pt_pkt_t) {
     .type       = type,
@@ -431,7 +426,7 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
     .n          = n
 #endif
   };
-  if (type == INTEL_PT_PKT_MTC) {
+  if ((type == INTEL_PT_PKT_MTC) && (mtc_ref == NULL)) {
     mtc_ref = &intel_pt_pkt_hist[ intel_pt_pkt_hist_idx ];
   }
   last_intel_pt_pkt     = &intel_pt_pkt_hist[ intel_pt_pkt_hist_idx ];
@@ -779,9 +774,11 @@ decode_again:
           tsc_ref_fc      = fc;
           tsc_ref_cyc_cnt = pkt->cyc_cnt;
 
+          mtc_ref = NULL;
           tsc_approx_ctc = 0.0f;
           tsc_approx_fc  = 0llu;
           tsc_approx();
+          tsc_approx_ref_prev = tsc_approx_ref;
         } else {
           fprintf(stderr, "tsc_mtc error 0!\n"); for (;;) { }
         }
@@ -940,7 +937,11 @@ decode_again:
       }
 
 #if defined(PRINT_PT)
-      fprintf(stdout, "MODE          = %20u\n", leaf_id);
+      if (leaf_id == 0u) {
+        fprintf(stdout, "MODE_EXEC     = %20u\n", leaf_id);
+      } else {
+        fprintf(stdout, "MODE_TSX      = %20u\n", leaf_id);
+      }
 #endif
 
       record_intel_pt_pkt(mode_pkt, ((unsigned long long int) (x[ 1u ])), cyc_cnt_ref, x, n);
@@ -1098,7 +1099,6 @@ decode_again:
       unsigned long long int cyc = (((unsigned long long int) (x[ 0u ])) >> 3llu) & 0x1Fllu;
       unsigned int           exp = (((unsigned int)           (x[ 0u ])) >> 2llu) & 0x01llu;
 
-      record_intel_pt_pkt(INTEL_PT_PKT_CYC, 0llu, cyc_cnt_ref, x, n);
       x++;
       n--;
       if (exp == 1u) {
@@ -1119,6 +1119,7 @@ cyc_again:
       }
       cyc_cnt_ref += cyc;
 
+      record_intel_pt_pkt(INTEL_PT_PKT_CYC, 0llu, cyc_cnt_ref, x, n);
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & SHORT_TNT_MASK) == SHORT_TNT)) {
