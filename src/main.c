@@ -809,6 +809,7 @@ static void* perfing_main(void* args) {
                     xed_ptrace_uregs(((double) (ptrace_tsc)), &uregs);
                     perfed_is_stopped = 0u;
                     ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
+                    fprintf(stdout, "INTEL_PT_INACTIVE_TIME  = %20.2lf ms\n", (((double) (read_tsc() - ptrace_tsc)) * tsc_hz_ns) / 1000000.0f);
 
 #if defined(PRINT_RECORD)
                     clock_gettime(CLOCK_MONOTONIC, &c);

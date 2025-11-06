@@ -7,7 +7,7 @@ static json_object* events;
 
 static int tid;
 
-static unsigned int no_tabs;
+static signed int no_tabs = -1;
 
 void perfed_json(const int perfed_pid) {
   tid = perfed_pid;
@@ -20,26 +20,33 @@ void perfed_json(const int perfed_pid) {
 
 void json_enter_call(const call_stack_t* const frame) {
   if (frame->tsc_c != 0.0f) {
-    for (unsigned int i = 0u; i < no_tabs; i++) {
-      fprintf(stdout, "_");
-    }
-    fprintf(stdout, "C %16llx %20.2lf %16llx\n", frame->ret->addr, frame->tsc_c, frame->call->addr);
     no_tabs++;
   }
 }
 
 void json_exit_call(const call_stack_t* const frame) {
   if (frame->tsc_c != 0.0f) {
-    no_tabs--;
-    for (unsigned int i = 0u; i < no_tabs; i++) {
-      fprintf(stdout, "_");
+    if ((frame->tsc_r != 0.0f) && (no_tabs >= 0)) {
+      for (signed int i = 0; i < no_tabs; i++) {
+        fprintf(stdout, "_");
+      }
+      fprintf(stdout, "C %16llx %20.2lf %16llx\n", frame->ret->addr, frame->tsc_c, frame->call->addr);
+      for (signed int i = 0; i < no_tabs; i++) {
+        fprintf(stdout, "_");
+      }
+      fprintf(stdout,
+              "R %16llx %20.2lf :: %20.2lf %6llu\n",
+              frame->ret->addr,
+              frame->tsc_r,
+              frame->tsc_r - frame->tsc_c,
+              frame->no_insts_r - frame->no_insts_c);
     }
-    fprintf(stdout, "R %16llx %20.2lf \n", frame->ret->addr, frame->tsc_r);
+    no_tabs--;
   }
 }
 
-void json_reset_call(const double tsc __attribute__((unused))) {
-  no_tabs = 0u;
+void json_reset_call(void) {
+  no_tabs = -1;
   fprintf(stdout, "\n");
 }
 

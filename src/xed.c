@@ -30,9 +30,9 @@
 #define SF(eflags) ((eflags >>  7llu) & 0x01llu)
 #define OF(eflags) ((eflags >> 11llu) & 0x01llu)
 
-#define CALL_STACK_LEN       (1u * 256u)
-#define TNT_QUEUE_LEN        (1u * 1024u)
-#define TIP_QUEUE_LEN        (1u * 1024u)
+#define CALL_STACK_LEN (1u * 256u)
+#define TNT_QUEUE_LEN  (1u * 1024u)
+#define TIP_QUEUE_LEN  (1u * 1024u)
 
 typedef struct {
   unsigned int           tnt;
@@ -150,7 +150,7 @@ static void print_inst_stats(const unsigned long long int cyc_cnt) {
   double                       ipc  = 0.0f;
 
   if (cycs >= 1llu) {
-    //fprintf(branches_fp, "Eq %u :: ", ctx_idx);
+    fprintf(branches_fp, "Eq %u :: ", ctx_idx);
     for (xed_iclass_enum_t i = XED_ICLASS_INVALID; i < XED_ICLASS_LAST; i++) {
       //if ((i >= XED_ICLASS_NOP) && (i <= XED_ICLASS_NOP9)) {
       //  continue;
@@ -159,7 +159,7 @@ static void print_inst_stats(const unsigned long long int cyc_cnt) {
 
         cnts += cnt;
         if (cnt >= 1u) {
-          //fprintf(branches_fp, "%4u * x_%04u + ", cnt, i);
+          fprintf(branches_fp, "%4u * x_%04u + ", cnt, i);
         }
       //}
       inst_stats.iclass_cnt[ i ] = 0u;
@@ -171,7 +171,7 @@ static void print_inst_stats(const unsigned long long int cyc_cnt) {
     inst_stats.n_ipc       += 1u;
     inst_stats.t_cnts      += cnts;
     inst_stats.t_cycs      += cycs;
-    //fprintf(branches_fp, "\b\b= %6llu :: %12.2lf\n", cycs, ipc);
+    fprintf(branches_fp, "\b\b= %6llu :: %12.2lf\n", cycs, ipc);
   }
 }
 
@@ -842,7 +842,12 @@ void xed_ptrace_uregs(const double                         tsc,
 }
 
 void xed_reset_call_stack(void) {
+  memset(&this_ctx->call_stack[ 0u ], 0, sizeof(this_ctx->call_stack));
   this_ctx->call_stack_idx = 0u;
+
+#if defined(EN_JSON_TRACE)
+  json_reset_call();
+#endif
 }
 
 void xed_reset_last_inst(void) {
@@ -1016,9 +1021,10 @@ void xed_process_branches(const unsigned int           tnt,
       } else if ((insts[ this_ctx->last_inst ].cofi.type & UNCOND_DIRECT_BRANCH) != 0u) {
         if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_CALL) {
           this_ctx->call_stack[ this_ctx->call_stack_idx ] = (call_stack_t) {
-            .call  = &insts[ this_ctx->last_inst + 0ll ],
-            .ret   = &insts[ this_ctx->last_inst + 1ll ],
-            .tsc_c = 0.0f
+            .call       = &insts[ this_ctx->last_inst + 0ll ],
+            .ret        = &insts[ this_ctx->last_inst + 1ll ],
+            .tsc_c      = 0.0f,
+            .no_insts_c = 0llu
           };
 #if defined(EN_JSON_TRACE)
           json_enter_call(&this_ctx->call_stack[ this_ctx->call_stack_idx ]);
@@ -1054,7 +1060,8 @@ void xed_process_branches(const unsigned int           tnt,
 
                 this_ctx->call_stack_idx--;
                 ret = this_ctx->call_stack[ this_ctx->call_stack_idx ].ret->addr;
-                this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r = 0.0f;
+                this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r      = 0.0f;
+                this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = 0llu;
 #if defined(EN_JSON_TRACE)
                 json_exit_call(&this_ctx->call_stack[ this_ctx->call_stack_idx ]);
 #endif
@@ -1084,9 +1091,10 @@ void xed_process_branches(const unsigned int           tnt,
         if (x_tip != NULL) {
           if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_CALL) {
             this_ctx->call_stack[ this_ctx->call_stack_idx ] = (call_stack_t) {
-              .call  = &insts[ this_ctx->last_inst + 0ll ],
-              .ret   = &insts[ this_ctx->last_inst + 1ll ],
-              .tsc_c = x_tip->tsc
+              .call       = &insts[ this_ctx->last_inst + 0ll ],
+              .ret        = &insts[ this_ctx->last_inst + 1ll ],
+              .tsc_c      = x_tip->tsc,
+              .no_insts_c = branches_n
             };
 #if defined(EN_JSON_TRACE)
             json_enter_call(&this_ctx->call_stack[ this_ctx->call_stack_idx ]);
@@ -1099,14 +1107,27 @@ void xed_process_branches(const unsigned int           tnt,
 
               this_ctx->call_stack_idx--;
               ret = this_ctx->call_stack[ this_ctx->call_stack_idx ].ret->addr;
-              this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r = x_tip->tsc;
+              this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r      = x_tip->tsc;
+              this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = branches_n;
+
+              if (ret != x_tip->tip) {
+                xed_close(); fprintf(stderr, "Broken call stack :: Invalid RET\n"); for (;;) {}
+              } else {
+                const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
+                const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
+
+                if ((tsc_c != 0.0f) && (tsc_r != 0.0f)) {
+                  const double tsc_rc = tsc_r - tsc_c;
+
+                  if (tsc_rc < 0.0f) {
+                    xed_close(); fprintf(stderr, "Broken call stack :: Negative call time %20.2lf\n", tsc_rc); for (;;) {}
+                  }
+                }
+              }
+
 #if defined(EN_JSON_TRACE)
               json_exit_call(&this_ctx->call_stack[ this_ctx->call_stack_idx ]);
 #endif
-
-              if (ret != x_tip->tip) {
-                fprintf(stderr, "Broken call stack!\n"); for (;;) {}
-              }
             }
           } else {
             // What to do in this case?!
@@ -1174,10 +1195,6 @@ void xed_async_reset(const unsigned long long int tip,
   fprintf(branches_fp, "Async Reset :: %20.2lf %16llx\n", tsc, tip);
   ctx_idx  = 0u;
   this_ctx = &ctx[ ctx_idx ];
-
-#if defined(EN_JSON_TRACE)
-  json_reset_call(tsc);
-#endif
 }
 
 void xed_async_enter(const unsigned long long int tip,
@@ -1196,12 +1213,13 @@ void xed_async_enter(const unsigned long long int tip,
   fprintf(branches_fp, "Async Enter :: %20.2lf %16llx\n", tsc, tip);
 }
 
-void xed_tsc_err(const double tsc_err, const unsigned int no_tsc_errs) {
+void xed_tsc_err(const double tsc_err) {
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-  fprintf(branches_fp, "TSC_ERR :: %20.2lf %6u\n", tsc_err, no_tsc_errs);
+  static unsigned int no_tsc_errs;
+
+  fprintf(branches_fp, "TSC_ERR :: %20.2lf %6u\n", tsc_err, ++no_tsc_errs);
 #else
   (void) (tsc_err);
-  (void) (no_tsc_errs);
 #endif
 }
 

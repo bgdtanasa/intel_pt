@@ -33,7 +33,7 @@
 
 #define MAX_NO_UNWINDS  (5000000llu)
 #define MAX_NO_BINARIES (512u)
-#define MAX_NO_INSTS    (50000000llu)
+#define MAX_NO_INSTS    (70000000llu)
 
 typedef enum {
   CFA_RULE_NONE,
@@ -115,6 +115,9 @@ typedef struct {
   const inst_t* ret;
   double        tsc_c;
   double        tsc_r;
+
+  unsigned long long int no_insts_c;
+  unsigned long long int no_insts_r;
 } call_stack_t;
 
 extern dwarf_unwind_t*    unwinds;
@@ -169,7 +172,7 @@ extern void xed_async_enter(const unsigned long long int tip,
                             const double                 tsc,
                             const unsigned long long int cyc_cnt);
 
-extern void xed_tsc_err(const double tsc_err, const unsigned int no_tsc_errs);
+extern void xed_tsc_err(const double tsc_err);
 
 extern const inst_t*         xed_unwind_find_inst(const unsigned long long int addr);
 extern const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr);
