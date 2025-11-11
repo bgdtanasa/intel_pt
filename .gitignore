@@ -11,7 +11,11 @@ kmod/.*
 kmod/*.ko
 kmod/*.mod*
 kmod/*.o
+kmod/*.dwo
 kmod/Module*
 kmod/modules*
 
 myperf
+branches.log
+unwind.log
+trace.json
