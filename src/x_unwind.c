@@ -23,18 +23,6 @@ static const inst_t*          unwind_cache[ CACHE_LENGTH ];
 static unsigned long long int cfa_regs[ MAX_NO_REGS ];
 static char                   perfed_name[ TASK_COMM_LEN ];
 
-extern unsigned long long int tsc_hz;
-
-static inline __attribute__((always_inline)) unsigned long long read_tsc(void) {
-    unsigned int lo;
-    unsigned int hi;
-
-    asm volatile ("rdtsc" : "=a"(lo), "=d"(hi));
-
-    return (((unsigned long long) (hi)) << 32llu) |
-           (((unsigned long long) (lo)) <<  0llu);
-}
-
 void perfed_unwind(const int perfed_pid) {
   unwind_fp = fopen("unwind.log", "w");
   if (unwind_fp == NULL) {
@@ -56,15 +44,18 @@ void perfed_unwind(const int perfed_pid) {
 
 void unwind(const int                            perfed_pid,
             const int                            perfed_cpu,
-            const struct user_regs_struct* const regs) {
+            const double                         tsc,
+            const struct user_regs_struct* const regs,
+            unwind_insts_t* const                unwind_insts) {
   unsigned long long int cfa;
   const inst_t*          inst;
   const dwarf_unwind_t*  unwind;
 #if defined(DO_STATS)
   struct timespec        a;
   struct timespec        b;
-  unsigned int           no_unwinds = 0u;
   signed long long       c;
+
+  clock_gettime(CLOCK_MONOTONIC, &a);
 #endif
 
   cfa_regs[  0u ] = ((unsigned long long int) (regs->rax));
@@ -85,25 +76,13 @@ void unwind(const int                            perfed_pid,
   cfa_regs[ 15u ] = ((unsigned long long int) (regs->r15));
   cfa_regs[ 16u ] = ((unsigned long long int) (regs->rip));
 
-  fprintf(unwind_fp,
-          "%s\t%d [%03d] %12.5lf: cpu-clock:\n",
-          &perfed_name[ 0u ],
-          perfed_pid,
-          perfed_cpu,
-          ((double) (read_tsc()) / ((double) (tsc_hz))));
-#if defined(DO_STATS)
-  clock_gettime(CLOCK_MONOTONIC, &a);
-#endif
+  unwind_insts->no_insts = 0u;
   kmod_redo_kmaps();
 unwind_again:
-#if defined(DO_STATS)
-  no_unwinds++;
-#endif
   if (cfa_regs[ 16u ] == 0llu) {
     return;
   }
-  if ((unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ] != NULL) &&
-      (unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ]->addr == cfa_regs[ 16u ])) {
+  if ((unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ] != NULL) && (unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ]->addr == cfa_regs[ 16u ])) {
     inst = unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ];
   } else {
     inst = xed_unwind_find_inst(cfa_regs[ 16u ]);
@@ -111,20 +90,11 @@ unwind_again:
     unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ] = inst;
   }
   if (inst == NULL) {
-    fprintf(unwind_fp, "Broken unwind R16 %16llx\n\n", cfa_regs[ 16u ]);
-    //return;
-    //unwind_close();
     fprintf(stderr, "UNWIND Instruction %16llx not found\n", cfa_regs[ 16u ]); return; for (;;) {}
   }
   unwind = (inst != NULL) ? (inst->unwind) : (NULL);
   if (unwind != NULL) {
-    fprintf(unwind_fp,
-            "\t%016llx %08llx_%s ([%s %016llx])\n",
-            cfa_regs[ 16u ],
-            inst->addr - inst->base_addr,
-            inst->binary,
-            inst->binary,
-            unwind->addr - unwind->base_addr);
+    unwind_insts->insts[ unwind_insts->no_insts++ ] = inst;
 
     // computing cfa
     if (unwind->cfa.rule == CFA_RULE_REG) {
@@ -153,19 +123,14 @@ unwind_again:
             perfing_x = proc_read_perfed_vm(perfed_pid, perfed_x);
             if (perfing_x != 0llu) {
               cfa_regs[ i ] = perfing_x;
-
-              fprintf(unwind_fp, "Restored unwind R%02u %16llx\n\n", i, perfed_x);
             } else {
-              fprintf(unwind_fp, "Broken unwind R%02u %16llx\n\n", i, perfed_x);
-              //return;
-              //unwind_close();
-              fprintf(stdout,
+              fprintf(stderr,
                       "Reg %2u outside range :: %16llx :: %64s %16llx %16llx\n",
                       i,
                       perfed_x,
                       inst->binary,
                       inst->addr - inst->base_addr,
-                      unwind->addr - unwind->base_addr); return; for (;;) {}
+                      unwind->addr - unwind->base_addr); for (;;) {}
             }
           }
         } break;
@@ -197,12 +162,32 @@ unwind_done:
   clock_gettime(CLOCK_MONOTONIC, &b);
   c = ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec));
   fprintf(stdout,
-          "unwind ts = %5u %12lld ns :: %12.lf\n",
-          no_unwinds,
+          "unwind ts = %5u %12lld ns :: %12.lf ns :: ",
+          unwind_insts->no_insts,
           c,
-          ((double) (c)) / ((double) (no_unwinds)));
+          (unwind_insts->no_insts >= 1u) ? (((double) (c)) / ((double) (unwind_insts->no_insts))) : (0.0f));
 #endif
-  fprintf(unwind_fp, "\n");
+  if (unwind_insts->no_insts >= 1u) {
+    fprintf(unwind_fp,
+            "%s\t%d [%03d] %20.3lf: cpu-clock:\n",
+            &perfed_name[ 0u ],
+            perfed_pid,
+            perfed_cpu,
+            tsc);
+
+    for (unsigned int i = 0u; i < unwind_insts->no_insts; i++) {
+      inst = unwind_insts->insts[ i ];
+
+      fprintf(unwind_fp,
+              "\t%016llx %08llx_%s ([%s %016llx])\n",
+              inst->addr,
+              inst->addr - inst->base_addr,
+              inst->binary,
+              inst->binary,
+              inst->unwind->addr - inst->unwind->base_addr);
+    }
+    fprintf(unwind_fp, "\n");
+  }
 }
 
 void unwind_close(void) {

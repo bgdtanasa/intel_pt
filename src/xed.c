@@ -688,7 +688,8 @@ void xed_ptrace_uregs(const double                         tsc,
       const unsigned int this_ctx_idx = ctx_idx;
 
       fprintf(branches_fp,
-              "\e[0;31m%10s %8llx %16llx %16.16s %10s %12s",
+              "\e[0;31m%10s [%2s] %8llx %16llx %16.16s %10s %12s",
+              "",
               "",
               i->addr - i->base_addr,
               i->addr,
@@ -940,8 +941,9 @@ void xed_process_branches(const unsigned int           tnt,
     if (insts[ this_ctx->last_inst ].cofi.type != 0u) {
 #endif
     sprintf(&branches_buffer[ 0u ],
-            "%10llu %8llx %16llx %16.16s %10s %12s",
+            "%10llu [%2u] %8llx %16llx %16.16s %10s %12s",
             branches_n,
+            ctx_idx,
             insts[ this_ctx->last_inst ].addr - insts[ this_ctx->last_inst ].base_addr,
             insts[ this_ctx->last_inst ].addr,
             insts[ this_ctx->last_inst ].binary,

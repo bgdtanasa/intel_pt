@@ -237,7 +237,10 @@ static __u64 last_switch_out;
 
 #if defined(DO_PTRACE)
 static unsigned long long int  ptrace_tsc;
-static struct user_regs_struct uregs;
+static struct user_regs_struct ptrace_uregs;
+#if defined(DO_UNWIND)
+static unwind_insts_t          ptrace_unwind_insts;
+#endif
 #endif
 
 static inline __attribute__((always_inline)) unsigned long long int read_tsc(void) {
@@ -636,12 +639,12 @@ static void* perfing_main(void* args) {
                                             ioctl(perfing_fd, PERF_EVENT_IOC_DISABLE, 0);
 
                                             errno = 0;
-                                            ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &uregs);
+                                            ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &ptrace_uregs);
                                             if (ret == -1l) {
                                                 fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno)); for (;;) {}
                                             } else {
 #if defined(DO_UNWIND)
-                                                unwind(perfed_pid, perfed_cpu, &uregs);
+                                                unwind(perfed_pid, perfed_cpu, ((double) (ptrace_tsc)), &ptrace_uregs, &ptrace_unwind_insts);
 #endif
                                             }
                                             errno = 0;
@@ -806,7 +809,7 @@ static void* perfing_main(void* args) {
             } else {
 #if defined(DO_PTRACE)
                 if (perfed_is_stopped == 1u) {
-                    xed_ptrace_uregs(((double) (ptrace_tsc)), &uregs);
+                    xed_ptrace_uregs(((double) (ptrace_tsc)), &ptrace_uregs);
                     perfed_is_stopped = 0u;
                     ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
                     fprintf(stdout, "INTEL_PT_INACTIVE_TIME  = %20.2lf ms\n", (((double) (read_tsc() - ptrace_tsc)) * tsc_hz_ns) / 1000000.0f);
