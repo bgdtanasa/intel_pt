@@ -218,6 +218,8 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
   cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L2_HIT,   0u, perfed_pid, perfed_cpu, intel_pt_fd);
   cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_DRAM_HIT, 0u, perfed_pid, perfed_cpu, intel_pt_fd);
   cnt_fd = install_pmu(GEN_PMU_MEM_LOAD_UOPS_RETIRED_L3_HIT,   0u, perfed_pid, perfed_cpu, intel_pt_fd);
+#else
+  cnt_fd = install_pmu(GEN_PMU_BR_INST_RETIRED_ALL_BRANCHES,   1u, perfed_pid, perfed_cpu, intel_pt_fd);
 #endif
   fprintf(stdout, "====== PMU ======\n");
 

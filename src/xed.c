@@ -150,7 +150,7 @@ static void print_inst_stats(const unsigned long long int cyc_cnt) {
   double                       ipc  = 0.0f;
 
   if (cycs >= 1llu) {
-    fprintf(branches_fp, "Eq %u :: ", ctx_idx);
+    //fprintf(branches_fp, "Eq %u :: ", ctx_idx);
     for (xed_iclass_enum_t i = XED_ICLASS_INVALID; i < XED_ICLASS_LAST; i++) {
       //if ((i >= XED_ICLASS_NOP) && (i <= XED_ICLASS_NOP9)) {
       //  continue;
@@ -159,7 +159,7 @@ static void print_inst_stats(const unsigned long long int cyc_cnt) {
 
         cnts += cnt;
         if (cnt >= 1u) {
-          fprintf(branches_fp, "%4u * x_%04u + ", cnt, i);
+          //fprintf(branches_fp, "%4u * x_%04u + ", cnt, i);
         }
       //}
       inst_stats.iclass_cnt[ i ] = 0u;
@@ -171,7 +171,7 @@ static void print_inst_stats(const unsigned long long int cyc_cnt) {
     inst_stats.n_ipc       += 1u;
     inst_stats.t_cnts      += cnts;
     inst_stats.t_cycs      += cycs;
-    fprintf(branches_fp, "\b\b= %6llu :: %12.2lf\n", cycs, ipc);
+    //fprintf(branches_fp, "\b\b= %6llu :: %12.2lf\n", cycs, ipc);
   }
 }
 
@@ -626,7 +626,7 @@ void xed_intel_pt_bip_fup(const unsigned long long int a,
                           const double                 tsc,
                           const unsigned long long int pmu_mask,
                           const unsigned long long int mem_addr) {
-  fprintf(branches_fp, "F :: %20.2lf %16llx %16llx :: %016llx %16llx\n", tsc, a, b, pmu_mask, mem_addr);
+  fprintf(branches_fp, "F :: %20.2lf :: %16llx -> %16llx MEM = %16llx\n", tsc, a, b, mem_addr);
   pmu_info(pmu_mask, branches_fp);
 }
 
@@ -688,7 +688,7 @@ void xed_ptrace_uregs(const double                         tsc,
       const unsigned int this_ctx_idx = ctx_idx;
 
       fprintf(branches_fp,
-              "\e[0;31m%10s [%2s] %8llx %16llx %16.16s %10s %12s",
+              "\e[0;31m%10s [%2s] %8llx %16llx %32.32s %10s %12s",
               "",
               "",
               i->addr - i->base_addr,
@@ -941,7 +941,7 @@ void xed_process_branches(const unsigned int           tnt,
     if (insts[ this_ctx->last_inst ].cofi.type != 0u) {
 #endif
     sprintf(&branches_buffer[ 0u ],
-            "%10llu [%2u] %8llx %16llx %16.16s %10s %12s",
+            "%10llu [%2u] %8llx %16llx %32.32s %10s %12s",
             branches_n,
             ctx_idx,
             insts[ this_ctx->last_inst ].addr - insts[ this_ctx->last_inst ].base_addr,

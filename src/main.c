@@ -32,7 +32,7 @@
 #include "kmod.h"
 #include "x_unwind.h"
 
-#if 1
+#if 0
 #define DO_PTRACE
 #endif
 #if defined(DO_PTRACE)
