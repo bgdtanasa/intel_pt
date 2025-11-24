@@ -31,7 +31,6 @@ do
         else
 			b=${a:0:31}
 		fi
-        #awk -v binary="${b}" '{ if (index($0, " " binary " ")) { print $0 } }' $LOG_FILE_PATH > insts.${a}
 
 		if [[ -s "insts.${a}" ]];
 		then
@@ -46,7 +45,6 @@ done
 l=vmlinux
 a=vmlinux
 b=vmlinux
-#awk '{ if (index($5,"ffffffff")) { print $0 } }' $LOG_FILE_PATH > insts.${a}
 
 echo "Generating resources for $l :: $b"
 DEBUGINFOD_URLS= INSTS_FILE_PATH=insts.${a} BINARY=${b} gdb -q -batch -ex "source vmlinux_gdb_addr2func.py" 2>&1 > addr2line.${a}

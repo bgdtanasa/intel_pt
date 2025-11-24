@@ -33,14 +33,6 @@
 #include "x_unwind.h"
 
 #if 0
-#define DO_PTRACE
-#endif
-#if defined(DO_PTRACE)
-#if 1
-#define DO_UNWIND
-#endif
-#endif
-#if 0
 #define PRINT_RECORD
 #endif
 
@@ -208,7 +200,7 @@ static int   perfed_msr_fd;
 static int   perfing_cpu;
 static int   perfing_fd;
 
-#if defined(DO_PTRACE)
+#if defined(EN_PTRACE_UNWIND)
 static unsigned int          perfed_is_stopped;
 #endif
 static volatile unsigned int perfing_is_running;
@@ -235,12 +227,10 @@ static __u64 switch_out;
 static __u64 last_switch_in;
 static __u64 last_switch_out;
 
-#if defined(DO_PTRACE)
+#if defined(EN_PTRACE_UNWIND)
 static unsigned long long int  ptrace_tsc;
 static struct user_regs_struct ptrace_uregs;
-#if defined(DO_UNWIND)
 static unwind_insts_t          ptrace_unwind_insts;
-#endif
 #endif
 
 static inline __attribute__((always_inline)) unsigned long long int read_tsc(void) {
@@ -507,12 +497,10 @@ static void* perfing_main(void* args) {
         (void) posix_memalign(((void**) (&aux_buffer)),  AUX_ALIGNMENT, AUX_BUFFER_SIZE * sizeof(__u8));  memset(aux_buffer,  0x00, AUX_BUFFER_SIZE * sizeof(__u8));
         perf_record = ((perf_record_t*) (data_buffer));
 
-#if defined(DO_UNWIND)
         // Load the kernel module by stopping the perfed pid
         {
             int status;
 
-            perfed_unwind(perfed_pid);
             if (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1) {
                 const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
 
@@ -528,9 +516,6 @@ static void* perfing_main(void* args) {
                 }
             }
         }
-#else
-        ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
-#endif
 
         for (;;) {
 #if defined(PRINT_RECORD)
@@ -617,7 +602,7 @@ static void* perfing_main(void* args) {
                             if (aux_util > aux_util_max) {
                                 aux_util_max = aux_util;
                             }
-#if defined(DO_PTRACE)
+#if defined(EN_PTRACE_UNWIND)
                             if (perfed_is_stopped == 0u) {
                                 long ret;
                                 int  status;
@@ -637,15 +622,14 @@ static void* perfing_main(void* args) {
                                             ptrace_tsc = read_tsc();
                                             perfed_is_stopped = 1u;
                                             ioctl(perfing_fd, PERF_EVENT_IOC_DISABLE, 0);
+                                            fprintf(stdout, "WSTOPSIG = %d :: ", WSTOPSIG(status));
 
                                             errno = 0;
                                             ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &ptrace_uregs);
                                             if (ret == -1l) {
                                                 fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno)); for (;;) {}
                                             } else {
-#if defined(DO_UNWIND)
                                                 unwind(perfed_pid, perfed_cpu, ((double) (ptrace_tsc)), &ptrace_uregs, &ptrace_unwind_insts);
-#endif
                                             }
                                             errno = 0;
                                             ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
@@ -807,7 +791,7 @@ static void* perfing_main(void* args) {
                 fprintf(stdout, "record ts = %12lld ns\n", ts_1);
 #endif
             } else {
-#if defined(DO_PTRACE)
+#if defined(EN_PTRACE_UNWIND)
                 if (perfed_is_stopped == 1u) {
                     xed_ptrace_uregs(((double) (ptrace_tsc)), &ptrace_uregs);
                     perfed_is_stopped = 0u;
@@ -846,10 +830,8 @@ static void* perfing_main(void* args) {
     }
     close(perfing_fd);
 
-#if defined(DO_UNWIND)
     unwind_close();
     kmod_unload();
-#endif
     xed_close();
     free(data_buffer);
     free(aux_buffer);
@@ -944,6 +926,7 @@ static void perfed_setup(void) {
                          perfing_fd,
                          perf_metadata->aux_offset);
                 if (p != MAP_FAILED) {
+                    perfed_unwind(perfed_pid);
                     perfed_xed(perfed_pid);
                     perfed_proc(perfed_pid, NULL);
                     perfed_pmu(perfed_pid, perfed_cpu, perfing_fd);

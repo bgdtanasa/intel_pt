@@ -18,8 +18,13 @@ CPP_FLAGS=
 CPP_FLAGS+=-DEN_RET_COMPRESSION
 CPP_FLAGS+=-DEN_VMLINUX
 #CPP_FLAGS+=-DEN_PMU
+#CPP_FLAGS+=-DEN_PTRACE_UNWIND
 #CPP_FLAGS+=-DEN_JSON_TRACE
 CFLAGS=$(INC_FLAGS) $(CPP_FLAGS) -Wno-unused-result -flto -m64 -mavx -static -static-libgcc -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
+CFLAGS+=-fsanitize=leak
+CFLAGS+=-fsanitize=address
+CFLAGS+=-fsanitize=undefined
+CFLAGS+=-fsanitize=address
 
 -include $(DEPS)
 
@@ -27,7 +32,7 @@ CFLAGS=$(INC_FLAGS) $(CPP_FLAGS) -Wno-unused-result -flto -m64 -mavx -static -st
 all: $(TARGET) kmod_all
 
 $(TARGET): $(OBJECTS)
-	$(LINK.cc) $^ -flto -ggdb -static -static-libgcc -L$(LIB_DIR) -lxed -ljson-c -o $@
+	$(LINK.cc) $^ -flto -ggdb -static -static-libgcc -L$(LIB_DIR) -lubsan -lxed -ljson-c -o $@
 
 kmod_all:
 	$(MAKE) -C kmod
