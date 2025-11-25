@@ -13,10 +13,10 @@
 
 #include <sys/user.h>
 
-#if 1
+#if 0
 #define PRINT_XED
 #else
-#if 0
+#if 1
 #define PRINT_XED_BRANCHES_ONLY
 #endif
 #endif
@@ -31,9 +31,10 @@
 #define INDIRECT_BRANCH      (1u << 2u)
 #define FAR_TRANSFER         (1u << 3u)
 
-#define MAX_NO_UNWINDS  (5000000llu)
-#define MAX_NO_BINARIES (512u)
-#define MAX_NO_INSTS    (70000000llu)
+#define MAX_NO_UNWINDS    (5000000llu)
+#define MAX_NO_BINARIES   (512u)
+#define MAX_BINARY_LENGTH (256u)
+#define MAX_NO_INSTS      (70000000llu)
 
 typedef enum {
   CFA_RULE_NONE,
@@ -120,15 +121,19 @@ typedef struct {
   unsigned long long int no_insts_r;
 } call_stack_t;
 
+#if defined(EN_PTRACE_UNWIND)
 extern dwarf_unwind_t*    unwinds;
 extern unsigned long long no_unwinds;
-extern char               binaries[ MAX_NO_BINARIES ][ 250u ];
+#endif
+extern char               binaries[ MAX_NO_BINARIES ][ MAX_BINARY_LENGTH ];
 extern unsigned int       no_binaries;
 extern inst_t*            insts;
 extern unsigned long long no_insts;
 
 extern const char* parse_get_binary(const char* const xed_file, const unsigned int add_file);
+#if defined(EN_PTRACE_UNWIND)
 extern void        parse_dwarf(const char* const xed_file, const unsigned long long int base_addr);
+#endif
 extern void        parse_objdump(const int perfed_pid, const char* const xed_file, const unsigned long long int base_addr);
 
 extern void perfed_xed(const int perfed_pid);
@@ -146,7 +151,8 @@ extern void xed_intel_pt_bip_fup(const unsigned long long int a,
                                  const unsigned long long int mem_addr);
 extern void xed_intel_pt_ptw_fup(const unsigned long long int ip,
                                  const double                 tsc,
-                                 const unsigned long long int cyc_cnt);
+                                 const unsigned long long int cyc_cnt,
+                                 const unsigned long long int ptw);
 extern void xed_intel_pt_tip_disable(const double                 tsc,
                                      const unsigned long long int cyc_cnt);
 
@@ -175,8 +181,10 @@ extern void xed_async_enter(const unsigned long long int tip,
 extern void xed_tsc_err(const double tsc_err);
 
 extern const inst_t*         xed_unwind_find_inst(const unsigned long long int addr);
+#if defined(EN_PTRACE_UNWIND)
 extern const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr);
 extern void                  xed_unwind_link_inst_and_dwarf(void);
+#endif
 
 extern void xed_close(void);
 

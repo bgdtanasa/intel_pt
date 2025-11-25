@@ -3,7 +3,7 @@ SOURCES=$(shell find $(SRC_DIR) -name "*.c")
 OBJECTS=$(SOURCES:%.c=%.o)
 DEPS=$(OBJECTS:%.o=%.d)
 TARGET=myperf
-XED_KIT=xed-install-base-2025-08-31-lin-x86-64
+XED_KIT=xed-install-base-2025-12-04-lin-x86-64
 
 INC_DIR=inc
 INC_SUBDIRS=$(shell find $(INC_DIR) -type d)
@@ -14,13 +14,15 @@ LIB_DIR=../xed/kits/$(XED_KIT)/lib
 
 CC=gcc
 CXX=gcc
+
 CPP_FLAGS=
 CPP_FLAGS+=-DEN_RET_COMPRESSION
 CPP_FLAGS+=-DEN_VMLINUX
 #CPP_FLAGS+=-DEN_PMU
 #CPP_FLAGS+=-DEN_PTRACE_UNWIND
-#CPP_FLAGS+=-DEN_JSON_TRACE
-CFLAGS=$(INC_FLAGS) $(CPP_FLAGS) -Wno-unused-result -flto -m64 -mavx -static -static-libgcc -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
+CPP_FLAGS+=-DEN_PTRACE_BRK
+
+CFLAGS=$(INC_FLAGS) $(CPP_FLAGS) -flto -Wno-unused-result -m64 -mavx -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
 CFLAGS+=-fsanitize=leak
 CFLAGS+=-fsanitize=address
 CFLAGS+=-fsanitize=undefined
@@ -28,16 +30,12 @@ CFLAGS+=-fsanitize=address
 
 -include $(DEPS)
 
-.PHONY: all kmod_all
-all: $(TARGET) kmod_all
+.PHONY: all
+all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
-	$(LINK.cc) $^ -flto -ggdb -static -static-libgcc -L$(LIB_DIR) -lubsan -lxed -ljson-c -o $@
-
-kmod_all:
-	$(MAKE) -C kmod
+	$(LINK.cc) $^ -flto -ggdb -L$(LIB_DIR) -lasan -lubsan -lxed -o $@
 
 .PHONY: clean
 clean:
 	rm -f $(TARGET) $(OBJECTS) $(DEPS)
-	$(MAKE) -C kmod clean

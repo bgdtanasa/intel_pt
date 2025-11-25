@@ -1,9 +1,10 @@
 #include "xed.h"
 #include "pmu.h"
 #include "proc.h"
-#if defined(EN_JSON_TRACE)
-#include "x_json.h"
+#if defined(EN_PTRACE_BRK)
+#include "brk.h"
 #endif
+#include "utils.h"
 
 #include <string.h>
 #include <errno.h>
@@ -73,9 +74,11 @@ typedef struct {
   unsigned long long int t_cycs;
 } inst_stats_t;
 
+#if defined(EN_PTRACE_UNWIND)
 dwarf_unwind_t*    unwinds;
 unsigned long long no_unwinds;
-char               binaries[ MAX_NO_BINARIES ][ 250u ];
+#endif
+char               binaries[ MAX_NO_BINARIES ][ MAX_BINARY_LENGTH ];
 unsigned int       no_binaries;
 inst_t*            insts;
 unsigned long long no_insts;
@@ -121,6 +124,7 @@ static unsigned long long int branches_n;
 static xed_chip_features_t chip_features;
 static inst_stats_t        inst_stats;
 
+extern double tsc_hz_ns;
 extern double tsc_factor;
 extern double cbr_factor;
 
@@ -194,6 +198,7 @@ const char* parse_get_binary(const char* const xed_file, const unsigned int add_
   }
 }
 
+#if defined(EN_PTRACE_UNWIND)
 void parse_dwarf(const char* const xed_file, const unsigned long long int base_addr) {
   char dwarf_file[ 256u ];
 
@@ -331,6 +336,7 @@ reg_again:
             strerror(errno)); for (;;) {}
   }
 }
+#endif
 
 void parse_objdump(const int perfed_pid, const char* const xed_file, const unsigned long long int base_addr) {
   (void) (perfed_pid);
@@ -543,6 +549,9 @@ xed_decode_inst:
                 (insts[ no_insts ].cofi.type != FAR_TRANSFER)) {
               fprintf(stderr, "Invalid COFI %u\n", insts[ no_insts ].cofi.type); for (;;) {}
             }
+#if defined(EN_PTRACE_BRK)
+            install_brk(&insts[ no_insts ]);
+#endif
             no_insts++;
           }
         } else if (xed_error == XED_ERROR_BUFFER_TOO_SHORT) {
@@ -577,12 +586,16 @@ xed_decode_inst:
 }
 
 void perfed_xed(const int perfed_pid) {
+  (void) (perfed_pid);
+
+#if defined(EN_PTRACE_UNWIND)
   unwinds = malloc(MAX_NO_UNWINDS * sizeof(dwarf_unwind_t));
   if (unwinds == NULL) {
     fprintf(stderr, "malloc failed\n"); for (;;) {}
   } else {
     fprintf(stdout, "unwinds size = %4llu MB\n", (MAX_NO_UNWINDS * sizeof(inst_t)) / 1024llu / 1024llu);
   }
+#endif
   insts = malloc(MAX_NO_INSTS * sizeof(inst_t));
   if (insts == NULL) {
     fprintf(stderr, "malloc failed\n"); for (;;) {}
@@ -597,12 +610,6 @@ void perfed_xed(const int perfed_pid) {
   if (branches_fp == NULL) {
     branches_fp = stdout;
   }
-
-#if defined(EN_JSON_TRACE)
-  perfed_json(perfed_pid);
-#else
-  (void) (perfed_pid);
-#endif
 }
 
 void xed_intel_pt_ovf_fup(const unsigned long long int ip,
@@ -632,8 +639,9 @@ void xed_intel_pt_bip_fup(const unsigned long long int a,
 
 void xed_intel_pt_ptw_fup(const unsigned long long int ip,
                           const double                 tsc,
-                          const unsigned long long int cyc_cnt) {
-  fprintf(branches_fp, "W :: %20.2lf %20llu %16llx\n", tsc, cyc_cnt, ip);
+                          const unsigned long long int cyc_cnt,
+                          const unsigned long long int ptw) {
+  fprintf(branches_fp, "W :: %20.2lf %20llu %16llx :: %llx\n", tsc, cyc_cnt, ip, ptw);
 }
 
 void xed_intel_pt_tip_disable(const double                 tsc,
@@ -845,10 +853,6 @@ void xed_ptrace_uregs(const double                         tsc,
 void xed_reset_call_stack(void) {
   memset(&this_ctx->call_stack[ 0u ], 0, sizeof(this_ctx->call_stack));
   this_ctx->call_stack_idx = 0u;
-
-#if defined(EN_JSON_TRACE)
-  json_reset_call();
-#endif
 }
 
 void xed_reset_last_inst(void) {
@@ -886,6 +890,7 @@ void xed_process_branches(const unsigned int           tnt,
                           const unsigned long long int tip,
                           const double                 tsc,
                           const unsigned long long int cyc_cnt) {
+  unsigned long long int a = read_tsc();
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
   static char branches_buffer[ 512u ];
 #endif
@@ -895,8 +900,8 @@ void xed_process_branches(const unsigned int           tnt,
   }
 
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-  fprintf(branches_fp, "    TSC :: %20.2lf\n", tsc);
-  fprintf(branches_fp, "    CYC :: %20llu\n", cyc_cnt);
+  //fprintf(branches_fp, "    TSC :: %20.2lf\n", tsc);
+  //fprintf(branches_fp, "    CYC :: %20llu\n", cyc_cnt);
 #endif
 
   tnt_t*       x_tnt = NULL;
@@ -934,6 +939,7 @@ void xed_process_branches(const unsigned int           tnt,
 
   for (;;) {
     if (this_ctx->last_inst == -1ll) {
+      fprintf(stdout, "0  XED TIME = %15.3lf\n", ((double) (read_tsc() - a)) * tsc_hz_ns);
       break;
     }
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
@@ -967,7 +973,9 @@ void xed_process_branches(const unsigned int           tnt,
 
     if (insts[ this_ctx->last_inst ].cofi.type == 0u) {
       update_inst_stats(insts[ this_ctx->last_inst ].iclass);
+#if defined(PRINT_XED)
       branches_n++;
+#endif
       this_ctx->last_inst++;
 #if defined(PRINT_XED)
       fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr);
@@ -1018,6 +1026,7 @@ void xed_process_branches(const unsigned int           tnt,
             x_tnt->cyc_cnt = 0llu;
           }
         } else {
+          fprintf(stdout, "1  XED TIME = %15.3lf\n", ((double) (read_tsc() - a)) * tsc_hz_ns);
           return;
         }
       } else if ((insts[ this_ctx->last_inst ].cofi.type & UNCOND_DIRECT_BRANCH) != 0u) {
@@ -1028,9 +1037,6 @@ void xed_process_branches(const unsigned int           tnt,
             .tsc_c      = 0.0f,
             .no_insts_c = 0llu
           };
-#if defined(EN_JSON_TRACE)
-          json_enter_call(&this_ctx->call_stack[ this_ctx->call_stack_idx ]);
-#endif
           this_ctx->call_stack_idx++;
 
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
@@ -1064,9 +1070,6 @@ void xed_process_branches(const unsigned int           tnt,
                 ret = this_ctx->call_stack[ this_ctx->call_stack_idx ].ret->addr;
                 this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r      = 0.0f;
                 this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = 0llu;
-#if defined(EN_JSON_TRACE)
-                json_exit_call(&this_ctx->call_stack[ this_ctx->call_stack_idx ]);
-#endif
 
                 update_inst_stats(insts[ this_ctx->last_inst ].iclass);
                 branches_n++;
@@ -1098,9 +1101,6 @@ void xed_process_branches(const unsigned int           tnt,
               .tsc_c      = x_tip->tsc,
               .no_insts_c = branches_n
             };
-#if defined(EN_JSON_TRACE)
-            json_enter_call(&this_ctx->call_stack[ this_ctx->call_stack_idx ]);
-#endif
             this_ctx->call_stack_idx++;
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_UNCOND_BR) {
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_RET) {
@@ -1113,7 +1113,7 @@ void xed_process_branches(const unsigned int           tnt,
               this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = branches_n;
 
               if (ret != x_tip->tip) {
-                xed_close(); fprintf(stderr, "Broken call stack :: Invalid RET\n"); for (;;) {}
+                xed_close(); fprintf(stderr, "Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
               } else {
                 const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
                 const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
@@ -1126,10 +1126,6 @@ void xed_process_branches(const unsigned int           tnt,
                   }
                 }
               }
-
-#if defined(EN_JSON_TRACE)
-              json_exit_call(&this_ctx->call_stack[ this_ctx->call_stack_idx ]);
-#endif
             }
           } else {
             // What to do in this case?!
@@ -1143,6 +1139,7 @@ void xed_process_branches(const unsigned int           tnt,
 #endif
           print_inst_stats(x_tip->cyc_cnt);
         } else {
+          fprintf(stdout, "2  XED TIME = %15.3lf\n", ((double) (read_tsc() - a)) * tsc_hz_ns);
           return;
         }
       } else if ((insts[ this_ctx->last_inst ].cofi.type & FAR_TRANSFER) != 0u) {
@@ -1175,6 +1172,7 @@ void xed_process_branches(const unsigned int           tnt,
             this_ctx = &ctx[ ctx_idx ];
           }
         } else {
+          fprintf(stdout, "3  XED TIME = %15.3lf\n", ((double) (read_tsc() - a)) * tsc_hz_ns);
           return;
         }
       } else {
@@ -1226,6 +1224,7 @@ void xed_tsc_err(const double tsc_err) {
 }
 
 const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
+  //unsigned long long int x = read_tsc();
   if (addr == 0llu) {
     return NULL;
   }
@@ -1236,6 +1235,7 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
 
   if (m != 0ll) {
     if ((insts[ m ].addr <= addr) && (addr <= insts[ m ].addr + insts[ m ].length - 1llu)) {
+      //fprintf(stdout, "0 FIND TIME = %15.3lf\n", ((double) (read_tsc() - x)) * tsc_hz_ns);
       return &insts[ m ];
     } else if (insts[ m ].addr < addr) {
       a = m + 1ll;
@@ -1248,6 +1248,7 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
     m = (a + b) / 2ll;
 
     if ((insts[ m ].addr <= addr) && (addr <= insts[ m ].addr + insts[ m ].length - 1llu)) {
+      //fprintf(stdout, "1 FIND TIME = %15.3lf\n", ((double) (read_tsc() - x)) * tsc_hz_ns);
       return &insts[ m ];
     } else if (insts[ m ].addr < addr) {
       a = m + 1ll;
@@ -1256,9 +1257,11 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
     }
   }
 
+  //fprintf(stdout, "2 FIND TIME = %15.3lf\n", ((double) (read_tsc() - x)) * tsc_hz_ns);
   return NULL;
 }
 
+#if defined(EN_PTRACE_UNWIND)
 const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr) {
   signed long long int   a = 0ll;
   signed long long int   b = ((signed long long int) (no_unwinds - 1llu));
@@ -1308,8 +1311,10 @@ void xed_unwind_link_inst_and_dwarf(void) {
     }
   }
 }
+#endif
 
 void xed_close(void) {
+#if defined(EN_PTRACE_UNWIND)
   for (unsigned int i = 0u; i < no_unwinds; i++) {
     if (unwinds[ i ].cfa.rule == CFA_RULE_EXP) {
       free(unwinds[ i ].cfa.s.exp);
@@ -1321,14 +1326,11 @@ void xed_close(void) {
     }
   }
   free(unwinds);
+#endif
   free(insts);
 
   if ((branches_fp != NULL) && (branches_fp != stdout)) {
     fflush(branches_fp);
     fclose(branches_fp);
   }
-
-#if defined(EN_JSON_TRACE)
-  json_close();
-#endif
 }

@@ -18,7 +18,7 @@ static const char* module_name = "kmod/main.ko";
 static char        module_params[ MAX_SZ_PARAMS ];
 static int         my_char_fd;
 
-void kmod_load(const int perfed_pid) {
+void perfed_kmod(const int perfed_pid) {
   int fd = open(module_name, O_RDONLY);
 
   if (fd == -1) {
@@ -61,7 +61,7 @@ void kmod_load(const int perfed_pid) {
   }
 }
 
-void kmod_unload(void) {
+void kmod_close(void) {
   if (my_char_fd != -1) {
     close(my_char_fd);
   }

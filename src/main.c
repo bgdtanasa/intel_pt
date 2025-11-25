@@ -25,12 +25,14 @@
 #include <linux/hw_breakpoint.h>
 #include <linux/perf_event.h>
 
+#include "utils.h"
 #include "intel_pt.h"
 #include "xed.h"
 #include "proc.h"
 #include "pmu.h"
 #include "kmod.h"
 #include "x_unwind.h"
+#include "brk.h"
 
 #if 0
 #define PRINT_RECORD
@@ -232,18 +234,6 @@ static unsigned long long int  ptrace_tsc;
 static struct user_regs_struct ptrace_uregs;
 static unwind_insts_t          ptrace_unwind_insts;
 #endif
-
-static inline __attribute__((always_inline)) unsigned long long int read_tsc(void) {
-    unsigned int lo;
-    unsigned int hi;
-
-    asm volatile ("rdtsc" : "=a"(lo), "=d"(hi));
-#if 0
-    asm volatile ("mfence" : : : "memory");
-#endif
-
-    return (((unsigned long long int) (hi)) << 32llu) | (((unsigned long long int) (lo)) <<  0llu);
-}
 
 static void perfed_msr(void) {
     char fd_name[ 128u ];
@@ -476,6 +466,8 @@ static void* perfing_main(void* args) {
         const __u64  perf_header_sz = ((__u64) (sizeof(struct perf_event_header)));
         __u64        perf_record_sz = 0llu;
 
+        int status;
+
 #if defined(PRINT_RECORD)
         struct timespec a = { 0 };
         struct timespec b = { 0 };
@@ -487,7 +479,7 @@ static void* perfing_main(void* args) {
 
         perfing_is_running = 1u;
         fprintf(stdout,
-                "perfing from cpu %2d via fd %2d :: pid %6d cpu %2d\n",
+                "perfing from cpu %2d via fd %2d on pid %6d at cpu %2d\n",
                 perfing_cpu,
                 perfing_fd,
                 perfed_pid,
@@ -498,24 +490,24 @@ static void* perfing_main(void* args) {
         perf_record = ((perf_record_t*) (data_buffer));
 
         // Load the kernel module by stopping the perfed pid
-        {
-            int status;
+        if (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1l) {
+            const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
 
-            if (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1) {
-                const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
+            if (perfed_pid_wait == perfed_pid) {
+                if (WIFSTOPPED(status)) {
+                    fprintf(stdout, "WSTOPSIG = %d\n", WSTOPSIG(status));
+                    ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
 
-                if (perfed_pid_wait == perfed_pid) {
-                    if (WIFSTOPPED(status)) {
-                        ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
-
-                        kmod_load(perfed_pid);
-                        ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
-                    }
-                } else {
-                    fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
+                    perfed_kmod(perfed_pid);
+                    ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
                 }
+            } else {
+                fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
             }
         }
+#if defined(EN_PTRACE_BRK)
+        perfed_brks(perfed_pid);
+#endif
 
         for (;;) {
 #if defined(PRINT_RECORD)
@@ -831,7 +823,8 @@ static void* perfing_main(void* args) {
     close(perfing_fd);
 
     unwind_close();
-    kmod_unload();
+    kmod_close();
+    brk_close();
     xed_close();
     free(data_buffer);
     free(aux_buffer);
@@ -1015,6 +1008,9 @@ int main(int argc, char *argv[ ]) {
         perfed_pid  = atoi(argv[ 1u ]);
         perfed_cpu  = atoi(argv[ 2u ]);
         perfing_cpu = atoi(argv[ 3u ]);
+#if defined(EN_PTRACE_BRK)
+        brking_cpu  = atoi(argv[ 4u ]);
+#endif
 
         {
             unsigned int eax;

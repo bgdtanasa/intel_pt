@@ -46,8 +46,11 @@ l=vmlinux
 a=vmlinux
 b=vmlinux
 
-echo "Generating resources for $l :: $b"
-DEBUGINFOD_URLS= INSTS_FILE_PATH=insts.${a} BINARY=${b} gdb -q -batch -ex "source vmlinux_gdb_addr2func.py" 2>&1 > addr2line.${a}
+if [[ -s "insts.${a}" ]];
+then
+	echo "Generating resources for $l :: $b"
+	DEBUGINFOD_URLS= INSTS_FILE_PATH=insts.${a} BINARY=${b} gdb -q -batch -ex "source vmlinux_gdb_addr2func.py" 2>&1 > addr2line.${a}
+fi
 
 echo "Generating the addr2line.* files ... Done"
 rm -rf addr2line.${PID}*
@@ -55,3 +58,13 @@ sort -n -k 1 addr2line.* -o addr2line.${PID}.0
 paste <(awk '{printf("%15s %8s %18s -> %18s %15s %20s\n", $1, $4, $5, $10, $8, $13)}' ${LOG_FILE_PATH}) <(awk '{printf("%48s %32s %s\n", $6, $7, $8)}' addr2line.${PID}.0) > addr2line.${PID}.1
 sed -i 's/#########/ /g' addr2line.${PID}.0
 sed -i 's/#########/ /g' addr2line.${PID}.1
+
+wc -l addr2line.${PID}.0
+U=$(wc -l addr2line.${PID}.1 | awk '{print $1}')
+V=$(wc -l ${LOG_FILE_PATH} | awk '{print $1}')
+if [[ "$U" == "$V" ]];
+then
+	echo "Success"
+else
+	echo "Error"
+fi

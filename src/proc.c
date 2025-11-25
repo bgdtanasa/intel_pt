@@ -129,15 +129,10 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
 
                 unsigned int o;
 
-                sscanf(line,
-                       "%016llx-%016llx %c%c%c%c %08x",
-                       &a,
-                       &b,
-                       &r,
-                       &w,
-                       &x,
-                       &p,
-                       &o);
+                sscanf(line, "%016llx-%016llx %c%c%c%c %08x", &a, &b, &r, &w, &x, &p, &o);
+                if (strstr(line, "[vsyscall]") != NULL) {
+                    continue;
+                }
                 if ((x == 'x') || (strstr(line, "[vdso]") != NULL)) {
                     while ((line[ 0u ] != '/') && (line[ 0u ] != '[')) {
                         if (line[ 0u ] == '\n') {
@@ -166,7 +161,9 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
                                 const unsigned long long int base_addr = (is_pie == 1u) ? (a - o) : (0llu);
 
                                 fprintf(stdout, "%64s %08x %u :: ", binary, o, is_pie);
+#if defined(EN_PTRACE_UNWIND)
                                 parse_dwarf(binary, base_addr);
+#endif
                                 parse_objdump(perfed_pid, binary, base_addr);
                             }
                         }
@@ -185,14 +182,18 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
 #if defined(EN_VMLINUX)
         fprintf(stdout, "====== KERNEL ======\n");
         fprintf(stdout, "%64s %08llx %u :: ", "vmlinux", 0llu, 0u);
+#if defined(EN_PTRACE_UNWIND)
         parse_dwarf("vmlinux", 0llu);
+#endif
         parse_objdump(perfed_pid, "vmlinux", 0llu);
         fprintf(stdout, "====== KERNEL ======\n");
 
         update_modules();
 #endif
 
+#if defined(EN_PTRACE_UNWIND)
         xed_unwind_link_inst_and_dwarf();
+#endif
         fclose(fp);
     } else {
         fprintf(stderr,

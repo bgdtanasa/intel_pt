@@ -609,7 +609,7 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
         xed_intel_pt_ovf_fup(ip, tsc_approx_ref, last_intel_pt_pkt_ovf->cyc_cnt);
         xed_async_reset(ip, tsc_approx_ref, cyc_cnt_ref);
         xed_update_last_inst(ip);
-        xed_process_branches(0u, 0u, 0u, tsc_approx_ref, last_intel_pt_pkt_ovf->cyc_cnt);
+        xed_process_branches(0u, 0u, 0llu, tsc_approx_ref, last_intel_pt_pkt_ovf->cyc_cnt);
 
 #if defined(PRINT_PT)
         fprintf(stdout, "FUP OVF       = %20llx\n", ip);
@@ -619,12 +619,12 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
       xed_intel_pt_tip_enable(ip, tsc_approx_ref, cyc_cnt_ref);
       xed_async_reset(ip, tsc_approx_ref, cyc_cnt_ref);
       xed_update_last_inst(ip);
-      xed_process_branches(0u, 0u, 0u, tsc_approx_ref, cyc_cnt_ref);
+      xed_process_branches(0u, 0u, 0llu, tsc_approx_ref, cyc_cnt_ref);
     } else if (pkt_type == INTEL_PT_PKT_TIP) {
       if (is_async_event(ip) == 1u) {
         xed_async_enter(ip, tsc_approx_ref, cyc_cnt_ref);
         xed_update_last_inst(ip);
-        xed_process_branches(0u, 0u, 0u, tsc_approx_ref, cyc_cnt_ref);
+        xed_process_branches(0u, 0u, 0llu, tsc_approx_ref, cyc_cnt_ref);
       } else {
         xed_process_branches(0u, 0u, ip, tsc_approx_ref, cyc_cnt_ref);
       }
@@ -1037,7 +1037,7 @@ decode_again:
         fprintf(stdout, "FUP PTW       = %20llx\n", fup);
 #endif
 
-        xed_intel_pt_ptw_fup(fup, last_intel_pt_pkt_ptw->tsc_approx, last_intel_pt_pkt_ptw->cyc_cnt);
+        xed_intel_pt_ptw_fup(fup, last_intel_pt_pkt_ptw->tsc_approx, last_intel_pt_pkt_ptw->cyc_cnt, last_intel_pt_pkt_ptw->v.ptw);
 
         last_ptw_fup = 0u;
         last_intel_pt_pkt->type = INTEL_PT_PKT_FUP_PTW;
