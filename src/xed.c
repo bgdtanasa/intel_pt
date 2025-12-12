@@ -890,7 +890,6 @@ void xed_process_branches(const unsigned int           tnt,
                           const unsigned long long int tip,
                           const double                 tsc,
                           const unsigned long long int cyc_cnt) {
-  unsigned long long int a = read_tsc();
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
   static char branches_buffer[ 512u ];
 #endif
@@ -939,7 +938,6 @@ void xed_process_branches(const unsigned int           tnt,
 
   for (;;) {
     if (this_ctx->last_inst == -1ll) {
-      fprintf(stdout, "0  XED TIME = %15.3lf\n", ((double) (read_tsc() - a)) * tsc_hz_ns);
       break;
     }
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
@@ -1023,10 +1021,10 @@ void xed_process_branches(const unsigned int           tnt,
           if (x_tnt->cyc_cnt != 0llu) {
             print_inst_stats(x_tnt->cyc_cnt);
 
+            x_tnt->tsc     = 0.0f;
             x_tnt->cyc_cnt = 0llu;
           }
         } else {
-          fprintf(stdout, "1  XED TIME = %15.3lf\n", ((double) (read_tsc() - a)) * tsc_hz_ns);
           return;
         }
       } else if ((insts[ this_ctx->last_inst ].cofi.type & UNCOND_DIRECT_BRANCH) != 0u) {
@@ -1042,14 +1040,14 @@ void xed_process_branches(const unsigned int           tnt,
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;
           xed_update_last_inst(insts[ this_ctx->last_inst ].cofi.u.c.addr);
-#if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
+#if defined(PRINT_XED)// || defined(PRINT_XED_BRANCHES_ONLY)
           fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr);
 #endif
         } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_UNCOND_BR) {
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;
           xed_update_last_inst(insts[ this_ctx->last_inst ].cofi.u.j.addr);
-#if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
+#if defined(PRINT_XED)// || defined(PRINT_XED_BRANCHES_ONLY)
           fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr);
 #endif
         } else {
@@ -1080,6 +1078,7 @@ void xed_process_branches(const unsigned int           tnt,
                 if (x_tnt->cyc_cnt != 0llu) {
                   print_inst_stats(x_tnt->cyc_cnt);
 
+                  x_tnt->tsc     = 0.0f;
                   x_tnt->cyc_cnt = 0llu;
                 }
                 continue;
@@ -1139,7 +1138,6 @@ void xed_process_branches(const unsigned int           tnt,
 #endif
           print_inst_stats(x_tip->cyc_cnt);
         } else {
-          fprintf(stdout, "2  XED TIME = %15.3lf\n", ((double) (read_tsc() - a)) * tsc_hz_ns);
           return;
         }
       } else if ((insts[ this_ctx->last_inst ].cofi.type & FAR_TRANSFER) != 0u) {
@@ -1172,7 +1170,6 @@ void xed_process_branches(const unsigned int           tnt,
             this_ctx = &ctx[ ctx_idx ];
           }
         } else {
-          fprintf(stdout, "3  XED TIME = %15.3lf\n", ((double) (read_tsc() - a)) * tsc_hz_ns);
           return;
         }
       } else {

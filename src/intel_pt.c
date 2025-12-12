@@ -54,7 +54,7 @@
 #define PRINT_PT
 #endif
 
-#define INTEL_PT_PKT_HISTORY (64u * 1024u)
+#define INTEL_PT_PKT_HISTORY (64u)
 
 typedef enum {
   INTEL_PT_PKT_NONE,
@@ -308,25 +308,32 @@ static void print_intel_pt_pkts(void) {
     } else {
 #if defined(AUX_DBG)
       fprintf(stdout,
-              "%4u " PRINT_FORMAT "%16llx %20llu :: %16llx %02x %02x %12llu\n",
+              "%4u " PRINT_FORMAT "%16llx %20llu %20.2lf :: %16llx %02x %02x %12llu\n",
               j,
               intel_pt_pkt_names[ intel_pt_pkt_hist[ j ].type ],
               intel_pt_pkt_hist[ j ].v.val,
               intel_pt_pkt_hist[ j ].cyc_cnt,
+              intel_pt_pkt_hist[ j ].tsc_approx,
               ((unsigned long long int) (intel_pt_pkt_hist[ j ].x)),
               ((unsigned int) (intel_pt_pkt_hist[ j ].y)),
               ((unsigned int) (*intel_pt_pkt_hist[ j ].x)),
               intel_pt_pkt_hist[ j ].n);
 #else
       fprintf(stdout,
-              "%4u " PRINT_FORMAT "%16llx %20llu\n",
+              "%4u " PRINT_FORMAT "%16llx %20llu %20.2lf\n",
               j,
               intel_pt_pkt_names[ intel_pt_pkt_hist[ j ].type ],
               intel_pt_pkt_hist[ j ].v.val,
-              intel_pt_pkt_hist[ j ].cyc_cnt);
+              intel_pt_pkt_hist[ j ].cyc_cnt,
+              intel_pt_pkt_hist[ j ].tsc_approx);
 #endif
     }
   }
+}
+
+static void reset_intel_pt_pkt(void) {
+  memset(&intel_pt_pkt_hist[ 0u ], 0, sizeof(intel_pt_pkt_hist));
+  intel_pt_pkt_hist_idx = 0u;
 }
 
 static const intel_pt_pkt_t* prev_intel_pt_pkt(const intel_pt_pkt_type_t type) {
@@ -354,86 +361,96 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
 #endif
   const unsigned int a = ((is_cyc_eligible(type) == 1u) || (type == INTEL_PT_PKT_CYC)) ? (1u) : (0u);
 
-  if (type == INTEL_PT_PKT_OVF) {
-    tsc_approx_ovf++;
-  } else if (type == INTEL_PT_PKT_TSC_MTC) {
+  tsc_approx_ovf += (type == INTEL_PT_PKT_OVF) ? (1u) : (0u);
+
+  if (type == INTEL_PT_PKT_TSC_MTC) {
+    for (unsigned int i = 1u; i < INTEL_PT_PKT_HISTORY; i++) {
+      const unsigned int j = (INTEL_PT_PKT_HISTORY + intel_pt_pkt_hist_idx - i) % INTEL_PT_PKT_HISTORY;
+
+      if (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_NONE) {
+        break;
+      } else if ((intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_MTC) && (intel_pt_pkt_hist[ j ].v.ctc == val)) {
+        if (intel_pt_pkt_hist[ j ].tsc_approx > tsc_ref) {
+#if defined(PRINT_PT)
+          fprintf(stdout, "\e[0;31mTSC_REAL_ERR  = %20.2lf\e[0m\n", tsc_ref - intel_pt_pkt_hist[ j ].tsc_approx);
+#endif
+
+          xed_tsc_err(tsc_ref - intel_pt_pkt_hist[ j ].tsc_approx);
+        }
+        break;
+      }
+    }
+
     tsc_approx_en  = 1u;
     tsc_approx_ctc = 0llu;
     tsc_approx_cyc = 0llu;
     tsc_approx_ovf = 0u;
-  } if (type == INTEL_PT_PKT_MTC) {
-    if (tsc_approx_en == 1u) {
-      static unsigned long long int ctc_prev = 0llu;
-      const unsigned long long int  ctc      = val;
+  } if ((type == INTEL_PT_PKT_MTC) && (tsc_approx_en == 1u)) {
+    static unsigned long long int ctc_prev = 0llu;
+    const unsigned long long int  ctc      = val;
 
-      if (tsc_approx_ovf >= 1u) {
-        if (ctc_prev < tsc_ref_ctc) {
-          if ((ctc_prev >= ctc) || (ctc >= tsc_ref_ctc)) {
-            tsc_ref_ctc_ovf += 1llu;
-          }
-        } else if (ctc_prev == tsc_ref_ctc) {
-        } else if (ctc_prev > tsc_ref_ctc) {
-          if ((tsc_ref_ctc <= ctc) && (ctc <= ctc_prev)) {
-            tsc_ref_ctc_ovf += 1llu;
-          }
-        } else {
+    if (tsc_approx_ovf >= 1u) {
+      if (ctc_prev < tsc_ref_ctc) {
+        if ((ctc_prev >= ctc) || (ctc >= tsc_ref_ctc)) {
+          tsc_ref_ctc_ovf += 1llu;
+        }
+      } else if (ctc_prev == tsc_ref_ctc) {
+      } else if (ctc_prev > tsc_ref_ctc) {
+        if ((tsc_ref_ctc <= ctc) && (ctc <= ctc_prev)) {
+          tsc_ref_ctc_ovf += 1llu;
         }
       } else {
-        tsc_ref_ctc_ovf += (ctc == tsc_ref_ctc) ? (1llu) : (0llu);
       }
-
-      tsc_approx_ctc  = ((double) ((((ctc - tsc_ref_ctc) & 0xFFllu) + (tsc_ref_ctc_ovf << 8llu)) * tsc_ratio));
-      tsc_approx_cyc  = 0llu;
-      tsc_approx_ovf  = 0u;
-      tsc_ref_cyc_cnt = cyc_cnt;
-
-      ctc_prev = ctc;
     } else {
-      tsc_ref_ctc_ovf = 0llu;
-      tsc_approx_ctc  = 0llu;
-      tsc_approx_cyc  = 0llu;
-      tsc_approx_ovf  = 0u;
-
-      tsc_approx_ref      = 0.0f;
-      tsc_approx_err      = 0.0f;
-      tsc_approx_ref_prev = 0.0f;
+      tsc_ref_ctc_ovf += (ctc == tsc_ref_ctc) ? (1llu) : (0llu);
     }
+
+    tsc_approx_ctc  = ((double) ((((ctc - tsc_ref_ctc) & 0xFFllu) + (tsc_ref_ctc_ovf << 8llu)) * tsc_ratio));
+    tsc_approx_cyc  = 0llu;
+    tsc_approx_ovf  = 0u;
+
+    tsc_ref_cyc_cnt = cyc_cnt;
+    ctc_prev        = ctc;
   } else if (type == INTEL_PT_PKT_TSC) {
-    if (tsc_approx_ref > tsc_ref) {
-#if defined(PRINT_PT)
-      fprintf(stdout, "\e[0;31mTSC_REAL_ERR  = %20.2lf\e[0m\n", tsc_approx_ref - tsc_ref);
-#endif
-
-      xed_tsc_err(tsc_approx_ref - tsc_ref);
-    }
-
+#if defined(EN_MTC)
     tsc_approx_en  = 0u;
+#else
+    tsc_approx_en  = 1u;
+#endif
     tsc_approx_ctc = 0llu;
     tsc_approx_cyc = 0llu;
     tsc_approx_ovf = 0u;
-
-    tsc_approx_ref      = 0.0f;
-    tsc_approx_err      = 0.0f;
-    tsc_approx_ref_prev = 0.0f;
   } else if ((a == 1u) && (tsc_approx_en == 1u)) {
     tsc_approx_cyc  += cyc_cnt - tsc_ref_cyc_cnt;
     tsc_ref_cyc_cnt  = cyc_cnt;
   }
-  tsc_approx_ref      = (cbr_factor != 0.0f) ? (tsc_ref + tsc_approx_ctc + ((double) (tsc_approx_cyc * base_factor)) / ((double) (cbr_factor))) : (0.0f);
-  if (tsc_approx_ref < tsc_approx_ref_prev) {
-    tsc_approx_err    = tsc_approx_ref - tsc_approx_ref_prev;
+
+  if (tsc_approx_en == 1u) {
+    tsc_approx_ref      = (cbr_factor != 0.0f) ? (tsc_ref + tsc_approx_ctc + ((double) (tsc_approx_cyc * base_factor)) / ((double) (cbr_factor))) : (0.0f);
+    tsc_approx_err      = (tsc_approx_ref < tsc_approx_ref_prev) ? (tsc_approx_ref - tsc_approx_ref_prev) : (0.0f);
+    tsc_approx_ref_prev = tsc_approx_ref;
+
+    if ((type == INTEL_PT_PKT_TSC) && (tsc_approx_err < 0.0f)) {
+#if defined(PRINT_PT)
+      fprintf(stdout, "\e[0;31mTSC_REAL_ERR  = %20.2lf\e[0m\n", tsc_approx_err);
+#endif
+
+      xed_tsc_err(tsc_approx_err);
+    }
   } else {
-    tsc_approx_err    = 0.0f;
+    tsc_approx_ref      = 0.0f;
+    tsc_approx_err      = 0.0f;
+    tsc_approx_ref_prev = 0.0f;
   }
-  tsc_approx_ref_prev = tsc_approx_ref;
 
 #if defined(PRINT_PT)
   fprintf(stdout,
-          PRINT_FORMAT "%16.2lf %16llu %20.2lf :: %16llu :: %16llx \e[0;31m%8.2lf\e[0m\n",
+          PRINT_FORMAT "%5u %16.2lf %16llu %20.2lf :: %16llu :: %16llx \e[0;31m%8.2lf\e[0m\n",
           intel_pt_pkt_names[ type ],
-          tsc_approx_ctc,
-          tsc_approx_cyc,
-          tsc_approx_ref,
+          intel_pt_pkt_hist_idx,
+          ((a == 1u) && (tsc_approx_en == 1u)) ? (tsc_approx_ctc) : (0.0f),
+          ((a == 1u) && (tsc_approx_en == 1u)) ? (tsc_approx_cyc) : (0llu),
+          ((a == 1u) && (tsc_approx_en == 1u)) ? (tsc_approx_ref) : (0.0f),
           cyc_cnt_ref,
           val,
           tsc_approx_err);
@@ -454,6 +471,15 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
   };
   last_intel_pt_pkt     = &intel_pt_pkt_hist[ intel_pt_pkt_hist_idx ];
   intel_pt_pkt_hist_idx = (intel_pt_pkt_hist_idx + 1u) % INTEL_PT_PKT_HISTORY;
+
+  if (type == INTEL_PT_PKT_TIP_PGD) {
+    reset_intel_pt_pkt();
+
+    tsc_approx_en  = 0u;
+    tsc_approx_ctc = 0llu;
+    tsc_approx_cyc = 0llu;
+    tsc_approx_ovf = 0u;
+  }
 }
 
 static unsigned long long int ip_decode(const volatile unsigned char** x,

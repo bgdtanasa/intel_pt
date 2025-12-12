@@ -16,17 +16,18 @@ CC=gcc
 CXX=gcc
 
 CPP_FLAGS=
+#CPP_FLAGS+=-DEN_MTC
 CPP_FLAGS+=-DEN_RET_COMPRESSION
 CPP_FLAGS+=-DEN_VMLINUX
 #CPP_FLAGS+=-DEN_PMU
 #CPP_FLAGS+=-DEN_PTRACE_UNWIND
-CPP_FLAGS+=-DEN_PTRACE_BRK
+#CPP_FLAGS+=-DEN_PTRACE_BRK
 
 CFLAGS=$(INC_FLAGS) $(CPP_FLAGS) -flto -Wno-unused-result -m64 -mavx -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
-CFLAGS+=-fsanitize=leak
-CFLAGS+=-fsanitize=address
-CFLAGS+=-fsanitize=undefined
-CFLAGS+=-fsanitize=address
+#CFLAGS+=-fsanitize=leak
+#CFLAGS+=-fsanitize=address
+#CFLAGS+=-fsanitize=undefined
+#CFLAGS+=-fsanitize=address
 
 -include $(DEPS)
 
@@ -34,7 +35,7 @@ CFLAGS+=-fsanitize=address
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
-	$(LINK.cc) $^ -flto -ggdb -L$(LIB_DIR) -lasan -lubsan -lxed -o $@
+	$(LINK.cc) $^ -flto -ggdb -L$(LIB_DIR) -lxed -o $@
 
 .PHONY: clean
 clean:

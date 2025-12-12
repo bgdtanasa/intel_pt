@@ -45,7 +45,11 @@
 #define INTEL_PT_CONFIG_CYC        ((__u64) (1llu <<  1llu))
 #define INTEL_PT_CONFIG_PWR_EVT    ((__u64) (1llu <<  4llu))
 #define INTEL_PT_CONFIG_FUP_ON_PTW ((__u64) (1llu <<  5llu))
+#if defined(EN_MTC)
 #define INTEL_PT_CONFIG_MTC        ((__u64) (1llu <<  9llu))
+#else
+#define INTEL_PT_CONFIG_MTC        ((__u64) (0llu <<  9llu))
+#endif
 #define INTEL_PT_CONFIG_TSC        ((__u64) (1llu << 10llu))
 #if defined(EN_RET_COMPRESSION)
 #define INTEL_PT_CONFIG_NORETCOMP  ((__u64) (0llu << 11llu))
