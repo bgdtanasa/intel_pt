@@ -457,6 +457,8 @@ static void* perfing_main(void* args) {
         unsigned int no_record_aux    = 0u;
         unsigned int no_record_switch = 0u;
 
+        unsigned long long int sz_record_aux = 0llu;
+
         double aux_util     = 0.0f;
         double aux_util_max = 0.0f;
 #if defined(PRINT_RECORD)
@@ -593,7 +595,6 @@ static void* perfing_main(void* args) {
                                         rc_aux_offset, aux_tail); for (;;) {}
                             }
 
-                            // Periodic unwinding by stopping the perfed pid
                             aux_util = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
                             if (aux_util > aux_util_max) {
                                 aux_util_max = aux_util;
@@ -646,6 +647,7 @@ static void* perfing_main(void* args) {
 #endif
 
                             no_record_aux++;
+                            sz_record_aux += rc_aux_size;
 #if defined(PRINT_RECORD)
                             fprintf(stdout,
                                     "         RECORD_AUX :: %20llu %12u %12u \e[0;31m%12llu %12.5lf %12.5lf\e[0m %6u\n",
@@ -805,6 +807,10 @@ static void* perfing_main(void* args) {
 
             if (perfing_is_running == 0u) {
                 fprintf(stdout, "Killing Intel PT ...\n");
+
+                fprintf(stdout, "no_record_aux = %u\n", no_record_aux);
+                fprintf(stdout, "sz_record_aux = %llu MB\n", sz_record_aux / ONE_MB);
+
                 break;
             } else if (perfing_is_running == 2u) {
                 fprintf(stdout, "Disabling Intel PT ...\n");
@@ -896,7 +902,7 @@ static void perfed_setup(void) {
         //perf_attrs.aux_output     = 1;
         perf_attrs.text_poke      = 1;
         perf_attrs.clockid        = CLOCK_MONOTONIC_RAW;
-        perf_attrs.aux_watermark    = ONE_MB;
+        perf_attrs.aux_watermark  = ONE_MB;
 
         perfing_fd = syscall(SYS_perf_event_open,
                              &perf_attrs,

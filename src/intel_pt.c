@@ -632,10 +632,10 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
       if (is_ovf_event(ip) == 1u) {
         last_intel_pt_pkt->type = INTEL_PT_PKT_FUP_OVF;
 
-        xed_intel_pt_ovf_fup(ip, tsc_approx_ref, last_intel_pt_pkt_ovf->cyc_cnt);
-        xed_async_reset(ip, tsc_approx_ref, cyc_cnt_ref);
+        xed_intel_pt_ovf_fup(ip, last_intel_pt_pkt_ovf->tsc_approx, last_intel_pt_pkt_ovf->cyc_cnt);
+        xed_async_reset(ip, last_intel_pt_pkt_ovf->tsc_approx, last_intel_pt_pkt_ovf->cyc_cnt);
         xed_update_last_inst(ip);
-        xed_process_branches(0u, 0u, 0llu, tsc_approx_ref, last_intel_pt_pkt_ovf->cyc_cnt);
+        xed_process_branches(0u, 0u, 0llu, last_intel_pt_pkt_ovf->tsc_approx, last_intel_pt_pkt_ovf->cyc_cnt);
 
 #if defined(PRINT_PT)
         fprintf(stdout, "FUP OVF       = %20llx\n", ip);

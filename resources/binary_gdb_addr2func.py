@@ -48,8 +48,8 @@ if __name__ == "__main__":
   with open(f"{log}", "r") as f:
     for l in f:
       w = l.split()
-      if " -> " in l and binary in w[ 5 ]:
-        main(w[ 0 ], int("0x" + w[ 3 ], 0), int("0x" + w[ 3 ], 0), w[ 5 ])
+      if " -> " in l and binary in w[ 4 ]:
+        main(w[ 0 ], int("0x" + w[ 2 ], 0), int("0x" + w[ 2 ], 0), w[ 4 ])
       else:
         print(l)
         print("Err")

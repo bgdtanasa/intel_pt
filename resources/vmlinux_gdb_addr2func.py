@@ -57,24 +57,13 @@ if __name__ == "__main__":
   gdb.execute(f"source                  {GDB_PY_PATH}",  to_string = True)
   gdb.execute(f"lx-symbols              {LINUX_PATH}",   to_string = True)
 
-  #pid     = int(os.getenv("PID"))
-  #pattern = re.compile(r"r[-w]x[sp]")
-  #with open(f"/proc/{pid}/maps") as f:
-  #  for l in f:
-  #    if pattern.search(l):
-  #      addr, perms, *rest = l.split()
-  #      path = rest[ -1 ] if rest else ""
-  #      #print(f"{addr}  {perms}  {path}")
-  #      addr_s, addr_e = addr.split('-')
-  #      gdb.execute(f"add-symbol-file {path} 0x{addr_s} -readnow", to_string = True)
-
   log    = os.getenv("INSTS_FILE_PATH")
   binary = os.getenv("BINARY")
   with open(f"{log}", "r") as f:
     for l in f:
       w = l.split()
-      if " -> " in l and "ffffffff" in w[ 4 ]:
-        main(w[ 0 ], int("0x" + w[ 3 ], 0), int("0x" + w[ 4 ], 0), w[ 5 ])
+      if " -> " in l and "ffffffff" in w[ 3 ]:
+        main(w[ 0 ], int("0x" + w[ 2 ], 0), int("0x" + w[ 3 ], 0), w[ 4 ])
       else:
         print(l)
         print("Err")
