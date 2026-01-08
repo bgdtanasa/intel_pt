@@ -128,6 +128,52 @@ extern double tsc_hz_ns;
 extern double tsc_factor;
 extern double cbr_factor;
 
+static void xed_print_stack(FILE* fp) {
+  if (ctx_idx >= 1u) {
+    return;
+  }
+
+  for (unsigned int i = ctx_idx; i >= 0u ; i--) {
+    if (ctx[ i ].call_stack_idx >= 1u) {
+      const inst_t* const inst_i = &insts[ ctx[ i ].last_inst ];
+
+      fprintf(fp,
+              "\t%2u/%2c %016llx %08llx_%s ([%20.2lf %s %016llx])\n",
+              i, 'x',
+              inst_i->addr,
+              inst_i->addr - inst_i->base_addr,
+              inst_i->binary,
+              0.0f,
+              inst_i->binary,
+              (inst_i->unwind != NULL) ? (inst_i->unwind->addr - inst_i->unwind->base_addr) : (0llu));
+
+      for (unsigned int j = ctx[ i ].call_stack_idx - 1u; j >= 0u ; j--) {
+        const inst_t* const inst_c = ctx[ i ].call_stack[ j ].call;
+        const double        tsc_c  = ctx[ i ].call_stack[ j ].tsc_c;
+
+        fprintf(fp,
+                "\t%2u/%2u %016llx %08llx_%s ([%20.2lf %s %016llx])\n",
+                i, j,
+                inst_c->addr,
+                inst_c->addr - inst_c->base_addr,
+                inst_c->binary,
+                tsc_c,
+                inst_c->binary,
+                (inst_c->unwind != NULL) ? (inst_c->unwind->addr - inst_c->unwind->base_addr) : (0llu));
+
+        if (j == 0u) {
+          break;
+        }
+      }
+    }
+
+    if (i == 0u) {
+      break;
+    }
+  }
+  fprintf(fp, "\n");
+}
+
 static inline __attribute__((always_inline)) void update_inst_stats(const xed_iclass_enum_t iclass) {
   inst_stats.iclass_cnt[ iclass ]++;
 }
@@ -945,7 +991,7 @@ void xed_process_branches(const unsigned int           tnt,
     if (insts[ this_ctx->last_inst ].cofi.type != 0u) {
 #endif
     sprintf(&branches_buffer[ 0u ],
-            "%10llu [%2u] %8llx %16llx %32.32s %10s %12s",
+            "%10llu %2u %8llx %16llx %32.32s %10s %12s",
             branches_n,
             ctx_idx,
             insts[ this_ctx->last_inst ].addr - insts[ this_ctx->last_inst ].base_addr,
@@ -1040,14 +1086,14 @@ void xed_process_branches(const unsigned int           tnt,
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;
           xed_update_last_inst(insts[ this_ctx->last_inst ].cofi.u.c.addr);
-#if defined(PRINT_XED)// || defined(PRINT_XED_BRANCHES_ONLY)
+#if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
           fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr);
 #endif
         } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_UNCOND_BR) {
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;
           xed_update_last_inst(insts[ this_ctx->last_inst ].cofi.u.j.addr);
-#if defined(PRINT_XED)// || defined(PRINT_XED_BRANCHES_ONLY)
+#if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
           fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr);
 #endif
         } else {
@@ -1066,7 +1112,7 @@ void xed_process_branches(const unsigned int           tnt,
 
                 this_ctx->call_stack_idx--;
                 ret = this_ctx->call_stack[ this_ctx->call_stack_idx ].ret->addr;
-                this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r      = 0.0f;
+                this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r      = x_tnt->tsc;
                 this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = 0llu;
 
                 update_inst_stats(insts[ this_ctx->last_inst ].iclass);
@@ -1112,7 +1158,7 @@ void xed_process_branches(const unsigned int           tnt,
               this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = branches_n;
 
               if (ret != x_tip->tip) {
-                xed_close(); fprintf(stderr, "Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
+                xed_close(); fprintf(stderr, "0 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
               } else {
                 const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
                 const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
@@ -1121,7 +1167,7 @@ void xed_process_branches(const unsigned int           tnt,
                   const double tsc_rc = tsc_r - tsc_c;
 
                   if (tsc_rc < 0.0f) {
-                    xed_close(); fprintf(stderr, "Broken call stack :: Negative call time %20.2lf\n", tsc_rc); for (;;) {}
+                    xed_close(); fprintf(stderr, "0 Broken call stack :: Negative call time %20.2lf\n", tsc_rc); for (;;) {}
                   }
                 }
               }
@@ -1143,6 +1189,40 @@ void xed_process_branches(const unsigned int           tnt,
       } else if ((insts[ this_ctx->last_inst ].cofi.type & FAR_TRANSFER) != 0u) {
         if (x_tip != NULL) {
           const xed_iclass_enum_t this_iclass = insts[ this_ctx->last_inst ].iclass;
+
+          if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSCALL) {
+            this_ctx->call_stack[ this_ctx->call_stack_idx ] = (call_stack_t) {
+              .call       = &insts[ this_ctx->last_inst + 0ll ],
+              .ret        = &insts[ this_ctx->last_inst + 1ll ],
+              .tsc_c      = x_tip->tsc,
+              .no_insts_c = branches_n
+            };
+            this_ctx->call_stack_idx++;
+          } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSRET) {
+            if (this_ctx->call_stack_idx >= 1u) {
+              unsigned long long int ret;
+
+              this_ctx->call_stack_idx--;
+              ret = this_ctx->call_stack[ this_ctx->call_stack_idx ].ret->addr;
+              this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r      = x_tip->tsc;
+              this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = branches_n;
+
+              if (ret != x_tip->tip) {
+                xed_close(); fprintf(stderr, "1 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
+              } else {
+                const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
+                const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
+
+                if ((tsc_c != 0.0f) && (tsc_r != 0.0f)) {
+                  const double tsc_rc = tsc_r - tsc_c;
+
+                  if (tsc_rc < 0.0f) {
+                    xed_close(); fprintf(stderr, "1 Broken call stack :: Negative call time %20.2lf\n", tsc_rc); for (;;) {}
+                  }
+                }
+              }
+            }
+          }
 
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;
