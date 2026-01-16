@@ -17,5 +17,4 @@ kmod/modules*
 
 myperf
 branches.log*
-unwind.log
-trace.json
+unwind.log*

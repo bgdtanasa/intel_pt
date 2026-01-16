@@ -10,7 +10,6 @@ export PID=$3
 
 rm -rf addr2line.*
 rm -rf insts.*
-rm -rf stk.*
 
 awk '{
 	if (index($0, " -> ")) {
@@ -58,12 +57,8 @@ then
 fi
 
 echo "Generating the addr2line.* files ... Done"
-rm -rf addr2line.${PID}*
 sort -n -k 1 addr2line.* -o addr2line.${PID}.0
-paste <(awk '{printf("%15s %2s %8s %18s -> %18s %15s %20s\n", $1, $2, $3, $4, $9, $7, $12)}' ${LOG_FILE_PATH}) <(awk '{printf("%48s %32s %s\n", $6, $7, $8)}' addr2line.${PID}.0) > addr2line.${PID}.1
-sed -i 's/#########/ /g' addr2line.${PID}.0
-sed -i 's/#########/ /g' addr2line.${PID}.1
-
+paste <(awk '{printf("%10s %2s %8s %16s -> %18s %15s %20s\n", $1, $2, $3, $4, $9, $7, $12)}' ${LOG_FILE_PATH}) <(awk '{printf("%48s %32s %s\n", $6, $7, $8)}' addr2line.${PID}.0) > addr2line.${PID}.1
 wc -l addr2line.${PID}.0
 U=$(wc -l addr2line.${PID}.1 | awk '{print $1}')
 V=$(wc -l ${LOG_FILE_PATH} | awk '{print $1}')
@@ -71,25 +66,23 @@ if [[ "$U" == "$V" ]];
 then
 	echo "Success"
 
-	awk 'BEGIN {
-			n = 0
-		} {
-			if ($7 ~ /CALL/) {
-				n++;
-				stk[ n ] = $0;
-				if (n >= 1) {
-					for (i = n; i >= 1; i--) {
-						print stk[ i ]
-					}
-					print ""
-				}
-			} else if ($7 ~ /RET/) {
-				if (n >= 1) {
-					n--;
-				}
-			}
-        } END {
-		}' addr2line.${PID}.1 > stk.${PID}
+	rm -rf ${RESOURCES_PATH}/../branches.log.x
+	awk '
+	NR==FNR {
+		key = sprintf("%10s %2s %8s %16s", $1, $2, $3, $4)
+		a[ key ] = sprintf("%48s %32s %s", $9, $10, $11)
+		next
+	} {
+		key = sprintf("%10s %2s %8s %16s", $1, $2, $3, $4)
+		if (key in a) {
+			print $0 " " a[key]
+		} else {
+			print $0
+		}
+	}' addr2line.${PID}.1 ${RESOURCES_PATH}/../branches.log > ${RESOURCES_PATH}/../branches.log.x
 else
 	echo "Error"
 fi
+
+#sed -i 's/#########/ /g' addr2line.${PID}.0
+#sed -i 's/#########/ /g' addr2line.${PID}.1
