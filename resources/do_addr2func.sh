@@ -70,7 +70,13 @@ then
 	awk '
 	NR==FNR {
 		key = sprintf("%10s %2s %8s %16s", $1, $2, $3, $4)
-		a[ key ] = sprintf("%48s %32s %s", $9, $10, $11)
+		if (NF == 10) {
+			a[ key ] = sprintf("%48s %32s %s", $8, $9, $10)
+		} else if (NF == 11) {
+			a[ key ] = sprintf("%48s %32s %s", $9, $10, $11)
+		} else {
+			a[ key ] = ""
+		}
 		next
 	} {
 		key = sprintf("%10s %2s %8s %16s", $1, $2, $3, $4)

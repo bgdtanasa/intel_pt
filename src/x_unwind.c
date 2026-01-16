@@ -1,86 +1,63 @@
 #include "x_unwind.h"
 #include "kmod.h"
-#include "xed.h"
 #include "proc.h"
+#include "utils.h"
 
 #include <stdio.h>
-#include <time.h>
-
-#ifndef TASK_COMM_LEN
-#define TASK_COMM_LEN (128u)
-#endif
+#include <string.h>
 
 #if 1
 #define DO_STATS
 #endif
 
-#define CACHE_NO_BITS (16u)
+#define CACHE_NO_BITS (20u)
 #define CACHE_MASK    ((1 << (CACHE_NO_BITS)) - 1u)
 #define CACHE_LENGTH  ((CACHE_MASK) + 1u)
 
-static FILE*                  unwind_fp;
 static const inst_t*          unwind_cache[ CACHE_LENGTH ];
 static unsigned long long int cfa_regs[ MAX_NO_REGS ];
-static char                   perfed_name[ TASK_COMM_LEN ];
 
-void perfed_unwind(const int perfed_pid) {
-  unwind_fp = fopen("unwind.log", "w");
-  if (unwind_fp == NULL) {
-    unwind_fp = stdout;
-  }
-  {
-    char  tmp[ 64u ];
-    FILE* fp;
+unwind_insts_t unwind_queue[ UNWIND_QUEUE_LEN ];
+unsigned int   unwind_queue_head;
+unsigned int   unwind_queue_tail;
 
-    snprintf(&tmp[ 0u ], sizeof(tmp), "/proc/%d/comm", perfed_pid);
-    fp = fopen(&tmp[ 0u ], "r");
-    if (fp != NULL) {
-      fscanf(fp, "%s", &perfed_name[ 0u ]);
+extern double tsc_hz_ns;
 
-      fclose(fp);
-    }
-  }
+void perfed_unwind(const int perfed_pid __attribute__((unused))) {
 }
 
-void unwind(const int                            perfed_pid,
-            const int                            perfed_cpu,
-            const double                         tsc,
-            const struct user_regs_struct* const regs,
-            unwind_insts_t* const                unwind_insts) {
+unwind_insts_t* unwind(const int                            perfed_pid,
+                       const struct user_regs_struct* const uregs) {
   unsigned long long int cfa;
   const inst_t*          inst;
-  const dwarf_unwind_t*  unwind;
-#if defined(DO_STATS)
-  struct timespec        a;
-  struct timespec        b;
-  signed long long       c;
+  const dwarf_unwind_t*  dwarf_unwind;
+  unwind_insts_t* const  unwind_insts = &unwind_queue[ unwind_queue_head ];
 
-  clock_gettime(CLOCK_MONOTONIC, &a);
-#endif
-
-  cfa_regs[  0u ] = ((unsigned long long int) (regs->rax));
-  cfa_regs[  1u ] = ((unsigned long long int) (regs->rdx));
-  cfa_regs[  2u ] = ((unsigned long long int) (regs->rcx));
-  cfa_regs[  3u ] = ((unsigned long long int) (regs->rbx));
-  cfa_regs[  4u ] = ((unsigned long long int) (regs->rsi));
-  cfa_regs[  5u ] = ((unsigned long long int) (regs->rdi));
-  cfa_regs[  6u ] = ((unsigned long long int) (regs->rbp));
-  cfa_regs[  7u ] = ((unsigned long long int) (regs->rsp));
-  cfa_regs[  8u ] = ((unsigned long long int) (regs->r8));
-  cfa_regs[  9u ] = ((unsigned long long int) (regs->r9));
-  cfa_regs[ 10u ] = ((unsigned long long int) (regs->r10));
-  cfa_regs[ 11u ] = ((unsigned long long int) (regs->r11));
-  cfa_regs[ 12u ] = ((unsigned long long int) (regs->r12));
-  cfa_regs[ 13u ] = ((unsigned long long int) (regs->r13));
-  cfa_regs[ 14u ] = ((unsigned long long int) (regs->r14));
-  cfa_regs[ 15u ] = ((unsigned long long int) (regs->r15));
-  cfa_regs[ 16u ] = ((unsigned long long int) (regs->rip));
-
+  unwind_insts->tsc      = read_tsc();
   unwind_insts->no_insts = 0u;
+
+  cfa_regs[  0u ] = ((unsigned long long int) (uregs->rax));
+  cfa_regs[  1u ] = ((unsigned long long int) (uregs->rdx));
+  cfa_regs[  2u ] = ((unsigned long long int) (uregs->rcx));
+  cfa_regs[  3u ] = ((unsigned long long int) (uregs->rbx));
+  cfa_regs[  4u ] = ((unsigned long long int) (uregs->rsi));
+  cfa_regs[  5u ] = ((unsigned long long int) (uregs->rdi));
+  cfa_regs[  6u ] = ((unsigned long long int) (uregs->rbp));
+  cfa_regs[  7u ] = ((unsigned long long int) (uregs->rsp));
+  cfa_regs[  8u ] = ((unsigned long long int) (uregs->r8));
+  cfa_regs[  9u ] = ((unsigned long long int) (uregs->r9));
+  cfa_regs[ 10u ] = ((unsigned long long int) (uregs->r10));
+  cfa_regs[ 11u ] = ((unsigned long long int) (uregs->r11));
+  cfa_regs[ 12u ] = ((unsigned long long int) (uregs->r12));
+  cfa_regs[ 13u ] = ((unsigned long long int) (uregs->r13));
+  cfa_regs[ 14u ] = ((unsigned long long int) (uregs->r14));
+  cfa_regs[ 15u ] = ((unsigned long long int) (uregs->r15));
+  cfa_regs[ 16u ] = ((unsigned long long int) (uregs->rip));
+
   kmod_redo_kmaps();
 unwind_again:
   if (cfa_regs[ 16u ] == 0llu) {
-    return;
+    return NULL;
   }
   if ((unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ] != NULL) && (unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ]->addr == cfa_regs[ 16u ])) {
     inst = unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ];
@@ -90,23 +67,23 @@ unwind_again:
     unwind_cache[ cfa_regs[ 16u ] & CACHE_MASK ] = inst;
   }
   if (inst == NULL) {
-    fprintf(stderr, "UNWIND Instruction %16llx not found\n", cfa_regs[ 16u ]); return; for (;;) {}
+    fprintf(stderr, "UNWIND Instruction %16llx not found\n", cfa_regs[ 16u ]); return NULL; for (;;) {}
   }
-  unwind = (inst != NULL) ? (inst->unwind) : (NULL);
-  if (unwind != NULL) {
+  dwarf_unwind = (inst != NULL) ? (inst->dwarf_unwind) : (NULL);
+  if (dwarf_unwind != NULL) {
     unwind_insts->insts[ unwind_insts->no_insts++ ] = inst;
 
     // computing cfa
-    if (unwind->cfa.rule == CFA_RULE_REG) {
-      cfa = cfa_regs[ unwind->cfa.s.reg ] + unwind->cfa.s.reg_offset;
-    } else if (unwind->cfa.rule == CFA_RULE_EXP) {
-      cfa = execute_dwarf_cfa_exp(unwind->cfa.s.exp, cfa_regs);
+    if (dwarf_unwind->cfa.rule == CFA_RULE_REG) {
+      cfa = cfa_regs[ dwarf_unwind->cfa.s.reg ] + dwarf_unwind->cfa.s.reg_offset;
+    } else if (dwarf_unwind->cfa.rule == CFA_RULE_EXP) {
+      cfa = execute_dwarf_cfa_exp(dwarf_unwind->cfa.s.exp, cfa_regs);
     } else {
-      fprintf(stdout, "Cfa default for instruction %16llx\n", unwind->addr); for (;;) {}
+      fprintf(stdout, "Cfa default for instruction %16llx\n", dwarf_unwind->addr); for (;;) {}
     }
     // updating cfa_regs
     for (unsigned int i = 0u; i <= 16u; i++) {
-      switch (unwind->regs[ i ].rule) {
+      switch (dwarf_unwind->regs[ i ].rule) {
         case REG_RULE_NONE: {
           //if (i == 7u) {
           //  fprintf(stdout, "\t\tR%02u %016llx\n", i, cfa_regs[ i ]);
@@ -114,7 +91,7 @@ unwind_again:
         } break;
 
         case REG_RULE_CFA: {
-          const unsigned long long int perfed_x  = cfa + unwind->regs[ i ].u.cfa;
+          const unsigned long long int perfed_x  = cfa + dwarf_unwind->regs[ i ].u.cfa;
           unsigned long long int       perfing_x = kmod_find_addr(perfed_x);
 
           if (perfing_x != 0llu) {
@@ -130,7 +107,7 @@ unwind_again:
                       perfed_x,
                       inst->binary,
                       inst->addr - inst->base_addr,
-                      unwind->addr - unwind->base_addr); for (;;) {}
+                      dwarf_unwind->addr - dwarf_unwind->base_addr); for (;;) {}
             }
           }
         } break;
@@ -140,7 +117,7 @@ unwind_again:
         } break;
 
         case REG_RULE_EXP: {
-          cfa_regs[ i ] = execute_dwarf_reg_exp(unwind->regs[ i ].exp, cfa_regs);
+          cfa_regs[ i ] = execute_dwarf_reg_exp(dwarf_unwind->regs[ i ].exp, cfa_regs);
         } break;
 
         case REG_RULE_UNDEFINED: {
@@ -148,7 +125,7 @@ unwind_again:
         } break;
 
         default: {
-          fprintf(stdout, "Reg %2u default[%d]\n", i, unwind->regs[ i ].rule); for (;;) {}
+          fprintf(stdout, "Reg %2u default[%d]\n", i, dwarf_unwind->regs[ i ].rule); for (;;) {}
         } break;
       }
     }
@@ -158,41 +135,18 @@ unwind_again:
     goto unwind_again;
   }
 unwind_done:
+  unwind_queue_head = (unwind_queue_head + 1u) % UNWIND_QUEUE_LEN;
 #if defined(DO_STATS)
-  clock_gettime(CLOCK_MONOTONIC, &b);
-  c = ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec));
   fprintf(stdout,
-          "unwind ts = %5u %12lld ns :: %12.lf ns :: ",
+          "unwind = %5u %12.2lf us %6u %6u :: ",
           unwind_insts->no_insts,
-          c,
-          (unwind_insts->no_insts >= 1u) ? (((double) (c)) / ((double) (unwind_insts->no_insts))) : (0.0f));
+          ((double) (read_tsc() - unwind_insts->tsc)) * tsc_hz_ns / 1000.0f,
+          unwind_queue_tail,
+          unwind_queue_head);
 #endif
-  if (unwind_insts->no_insts >= 1u) {
-    fprintf(unwind_fp,
-            "%s\t%d [%03d] %20.3lf: cpu-clock:\n",
-            &perfed_name[ 0u ],
-            perfed_pid,
-            perfed_cpu,
-            tsc);
 
-    for (unsigned int i = 0u; i < unwind_insts->no_insts; i++) {
-      inst = unwind_insts->insts[ i ];
-
-      fprintf(unwind_fp,
-              "\t%016llx %08llx_%s ([%s %016llx])\n",
-              inst->addr,
-              inst->addr - inst->base_addr,
-              inst->binary,
-              inst->binary,
-              inst->unwind->addr - inst->unwind->base_addr);
-    }
-    fprintf(unwind_fp, "\n");
-  }
+  return unwind_insts;
 }
 
 void unwind_close(void) {
-  if ((unwind_fp != NULL) && (unwind_fp != stdout)) {
-    fflush(unwind_fp);
-    fclose(unwind_fp);
-  }
 }

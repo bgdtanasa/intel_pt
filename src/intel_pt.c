@@ -1,10 +1,17 @@
-#include <stdio.h>
-#include <string.h>
-
 #include "intel_pt.h"
 #include "pmu.h"
 #include "xed.h"
 #include "proc.h"
+#if defined(EN_PTRACE_UNWIND)
+#include "x_unwind.h"
+#endif
+
+#include <stdio.h>
+#include <string.h>
+
+#include <sys/ioctl.h>
+
+#include <linux/perf_event.h>
 
 #define PSB       (0x82028202u) // 1000_0010_0000_0010_1000_0010_0000_0010
 #define MNT       (0x88C302u)   //           1000_1000_1100_0011_0000_0010
@@ -204,6 +211,8 @@ static unsigned long long int cyc_cnt_ref;
 double tsc_factor;
 double base_factor;
 double cbr_factor;
+
+intel_pt_status_t intel_pt_status = INTEL_PT_STATUS_DISABLE;
 
 static inline __attribute__((always_inline)) unsigned int is_cyc_eligible(const intel_pt_pkt_type_t type) {
   return ((type == INTEL_PT_PKT_OVF)       ||
@@ -623,6 +632,19 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   }
   *x = x_p;
   *n = n_p;
+
+#if defined(EN_PTRACE_UNWIND)
+  {
+    unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
+
+    if ((unwind_insts->no_insts >= 1u) && (unwind_insts->tsc != 0llu) && (tsc_approx_ref >= ((double) (unwind_insts->tsc)))) {
+      xed_ptrace_unwind(unwind_insts);
+
+      memset(unwind_insts, 0, sizeof(unwind_insts_t));
+      unwind_queue_tail = (unwind_queue_tail + 1u) % UNWIND_QUEUE_LEN;
+    }
+  }
+#endif
 
 #if defined(PRINT_PT)
   fprintf(stdout, "IP            = %20llx\n", ip);
@@ -1213,6 +1235,14 @@ cyc_again:
   return n;
 }
 
-void intel_pt_reset(void) {
-  xed_reset_last_inst();
+void intel_pt_enable(const int intel_pt_fd) {
+  if (ioctl(intel_pt_fd, PERF_EVENT_IOC_ENABLE, 0) == 0) {
+    intel_pt_status = INTEL_PT_STATUS_ENABLE;
+  }
+}
+
+void intel_pt_disable(const int intel_pt_fd) {
+  if (ioctl(intel_pt_fd, PERF_EVENT_IOC_DISABLE, 0) == 0) {
+    intel_pt_status = INTEL_PT_STATUS_DISABLE;
+  }
 }

@@ -1,8 +1,12 @@
 #include "xed.h"
+#include "intel_pt.h"
 #include "pmu.h"
 #include "proc.h"
 #if defined(EN_PTRACE_BRK)
 #include "brk.h"
+#endif
+#if defined(EN_PTRACE_UNWIND)
+#include "x_unwind.h"
 #endif
 #include "utils.h"
 
@@ -23,6 +27,10 @@
 #include "xed-decode.h"
 #include "xed-decoded-inst.h"
 #include "xed-decoded-inst-api.h"
+
+#define CACHE_NO_BITS (20u)
+#define CACHE_MASK    ((1 << (CACHE_NO_BITS)) - 1u)
+#define CACHE_LENGTH  ((CACHE_MASK) + 1u)
 
 #define CF(eflags) ((eflags >>  0llu) & 0x01llu)
 #define PF(eflags) ((eflags >>  2llu) & 0x01llu)
@@ -83,7 +91,7 @@ unsigned int       no_binaries;
 inst_t*            insts;
 unsigned long long no_insts;
 
-static ctx_t        ctx[ 10u ] = {
+static ctx_t        ctx[ 5u ] = {
   [ 0u ] = {
     .last_inst = -1ll
   },
@@ -98,25 +106,10 @@ static ctx_t        ctx[ 10u ] = {
   },
   [ 4u ] = {
     .last_inst = -1ll
-  },
-  [ 5u ] = {
-    .last_inst = -1ll
-  },
-  [ 6u ] = {
-    .last_inst = -1ll
-  },
-  [ 7u ] = {
-    .last_inst = -1ll
-  },
-  [ 8u ] = {
-    .last_inst = -1ll
-  },
-  [ 9u ] = {
-    .last_inst = -1ll
   }
 };
-static ctx_t*       this_ctx   = &ctx[ 0u ];
-static unsigned int ctx_idx    = 0u;
+static ctx_t*       this_ctx  = &ctx[ 0u ];
+static unsigned int ctx_idx   = 0u;
 
 static FILE*                  branches_fp;
 static unsigned long long int branches_n;
@@ -124,55 +117,15 @@ static unsigned long long int branches_n;
 static xed_chip_features_t chip_features;
 static inst_stats_t        inst_stats;
 
+#if defined(EN_VMLINUX)
+static const inst_t* unwind_cache_high[ CACHE_LENGTH ];
+#endif
+static const inst_t* unwind_cache_low[ CACHE_LENGTH ];
+
+extern char   perfed_name[ ];
 extern double tsc_hz_ns;
 extern double tsc_factor;
 extern double cbr_factor;
-
-static void xed_print_stack(FILE* fp) {
-  if (ctx_idx >= 1u) {
-    return;
-  }
-
-  for (unsigned int i = ctx_idx; i >= 0u ; i--) {
-    if (ctx[ i ].call_stack_idx >= 1u) {
-      const inst_t* const inst_i = &insts[ ctx[ i ].last_inst ];
-
-      fprintf(fp,
-              "\t%2u/%2c %016llx %08llx_%s ([%20.2lf %s %016llx])\n",
-              i, 'x',
-              inst_i->addr,
-              inst_i->addr - inst_i->base_addr,
-              inst_i->binary,
-              0.0f,
-              inst_i->binary,
-              (inst_i->unwind != NULL) ? (inst_i->unwind->addr - inst_i->unwind->base_addr) : (0llu));
-
-      for (unsigned int j = ctx[ i ].call_stack_idx - 1u; j >= 0u ; j--) {
-        const inst_t* const inst_c = ctx[ i ].call_stack[ j ].call;
-        const double        tsc_c  = ctx[ i ].call_stack[ j ].tsc_c;
-
-        fprintf(fp,
-                "\t%2u/%2u %016llx %08llx_%s ([%20.2lf %s %016llx])\n",
-                i, j,
-                inst_c->addr,
-                inst_c->addr - inst_c->base_addr,
-                inst_c->binary,
-                tsc_c,
-                inst_c->binary,
-                (inst_c->unwind != NULL) ? (inst_c->unwind->addr - inst_c->unwind->base_addr) : (0llu));
-
-        if (j == 0u) {
-          break;
-        }
-      }
-    }
-
-    if (i == 0u) {
-      break;
-    }
-  }
-  fprintf(fp, "\n");
-}
 
 static inline __attribute__((always_inline)) void update_inst_stats(const xed_iclass_enum_t iclass) {
   inst_stats.iclass_cnt[ iclass ]++;
@@ -700,9 +653,6 @@ void xed_intel_pt_tip_disable(const double                 tsc,
   }
 
   fprintf(branches_fp, "D :: %20.2lf %20llu\n", tsc, cyc_cnt);
-
-  xed_reset_call_stack();
-  xed_reset_last_inst();
 }
 
 void xed_tid_switch(const double       tsc,
@@ -715,6 +665,7 @@ void xed_tid_switch(const double       tsc,
   }
 }
 
+#if defined(EN_PTRACE_UNWIND)
 void xed_ptrace_uregs(const double                         tsc,
                       const struct user_regs_struct* const uregs) {
   fprintf(branches_fp, "R :: %20.2lf RAX = %16llx\n", tsc, uregs->rax);
@@ -736,149 +687,126 @@ void xed_ptrace_uregs(const double                         tsc,
   fprintf(branches_fp, "R :: %20.2lf RIP = %16llx\n", tsc, uregs->rip);
 #if 0
   {
-    const inst_t* const i = xed_unwind_find_inst(uregs->rip);
+    const inst_t* const inst = xed_unwind_find_inst(uregs->rip);
 
-    if (i != NULL) {
+    if (inst != NULL) {
       const unsigned int this_ctx_idx = ctx_idx;
 
-      fprintf(branches_fp,
-              "\e[0;31m%10s [%2s] %8llx %16llx %32.32s %10s %12s",
-              "",
-              "",
-              i->addr - i->base_addr,
-              i->addr,
-              i->binary,
-              xed_category_enum_t2str(i->category),
-              xed_iclass_enum_t2str(i->iclass));
-
-#if defined(PRINT_XED_OPCODE)
-      for (unsigned int j = 0u; j < 10u; j++) {
-        if (j < i->length) {
-          fprintf(branches_fp, " %02x", ((unsigned int) (i->bytes[ j ])));
-        } else {
-          fprintf(branches_fp, "   ");
-        }
-      }
-#endif
-      fprintf(branches_fp, "\e[0m\n");
-
       this_ctx = &ctx[ 0u ];
-      if ((this_ctx->last_inst != -1ll) && (insts[ this_ctx->last_inst ].addr < 0xFFFFFFFF8000000llu)) {
-        if (i->cofi.type == 0u) {
+      if (inst->cofi.type == 0u) {
+        xed_update_last_inst(uregs->rip);
+        xed_process_branches(0u, 0u, 0llu, 0.0f, 0llu);
+      } else if (inst->cofi.type & COND_BRANCH) {
+        unsigned int tnt = 2u;
+
+        switch (inst->iclass) {
+          case XED_ICLASS_JB: {
+            const unsigned long long int cf = CF(uregs->eflags);
+
+            tnt = (cf == 1llu) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JBE: {
+            const unsigned long long int cf = CF(uregs->eflags);
+            const unsigned long long int zf = ZF(uregs->eflags);
+
+            tnt = ((cf == 1llu) || (zf == 1llu)) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JL: {
+            const unsigned long long int sf = SF(uregs->eflags);
+            const unsigned long long int of = OF(uregs->eflags);
+
+            tnt = (sf != of) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JLE: {
+            const unsigned long long int zf = ZF(uregs->eflags);
+            const unsigned long long int sf = SF(uregs->eflags);
+            const unsigned long long int of = OF(uregs->eflags);
+
+            tnt = ((zf == 1llu) || (sf != of)) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JNB: {
+            const unsigned long long int cf = CF(uregs->eflags);
+
+            tnt = (cf == 0llu) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JNBE: {
+            const unsigned long long int cf = CF(uregs->eflags);
+            const unsigned long long int zf = ZF(uregs->eflags);
+
+            tnt = ((cf == 0llu) && (zf == 0llu)) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JNL: {
+            const unsigned long long int sf = SF(uregs->eflags);
+            const unsigned long long int of = OF(uregs->eflags);
+
+            tnt = (sf == of) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JNLE: {
+            const unsigned long long int zf = ZF(uregs->eflags);
+            const unsigned long long int sf = SF(uregs->eflags);
+            const unsigned long long int of = OF(uregs->eflags);
+
+            tnt = ((zf == 0llu) && (sf == of)) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JNP: {
+            const unsigned long long int pf = PF(uregs->eflags);
+
+            tnt = (pf == 0llu) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JNS: {
+            const unsigned long long int sf = SF(uregs->eflags);
+
+            tnt = (sf == 0llu) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JNZ: {
+            const unsigned long long int zf = ZF(uregs->eflags);
+
+            tnt = (zf == 0llu) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JO: {
+            const unsigned long long int of = OF(uregs->eflags);
+
+            tnt = (of == 1llu) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JP: {
+            const unsigned long long int pf = PF(uregs->eflags);
+
+            tnt = (pf == 1llu) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JS: {
+            const unsigned long long int sf = SF(uregs->eflags);
+
+            tnt = (sf == 1llu) ? (1u) : (0u);
+          } break;
+
+          case XED_ICLASS_JZ: {
+            const unsigned long long int zf = ZF(uregs->eflags);
+
+            tnt = (zf == 1llu) ? (1u) : (0u);
+          } break;
+
+          default: {
+            fprintf(stderr, "ICLASS = %d\n", inst->iclass); for (;;) {}
+            tnt = 2u;
+          } break;
+        }
+
+        if (tnt <= 1u) {
           xed_update_last_inst(uregs->rip);
-          xed_process_branches(0u, 0u, 0llu, 0.0f, 0llu);
-        } else if (i->cofi.type & COND_BRANCH) {
-          unsigned int tnt = 2u;
-
-          switch (i->iclass) {
-            case XED_ICLASS_JB: {
-              const unsigned long long int cf = CF(uregs->eflags);
-
-              tnt = (cf == 1llu) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JBE: {
-              const unsigned long long int cf = CF(uregs->eflags);
-              const unsigned long long int zf = ZF(uregs->eflags);
-
-              tnt = ((cf == 1llu) || (zf == 1llu)) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JL: {
-              const unsigned long long int sf = SF(uregs->eflags);
-              const unsigned long long int of = OF(uregs->eflags);
-
-              tnt = (sf != of) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JLE: {
-              const unsigned long long int zf = ZF(uregs->eflags);
-              const unsigned long long int sf = SF(uregs->eflags);
-              const unsigned long long int of = OF(uregs->eflags);
-
-              tnt = ((zf == 1llu) || (sf != of)) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JNB: {
-              const unsigned long long int cf = CF(uregs->eflags);
-
-              tnt = (cf == 0llu) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JNBE: {
-              const unsigned long long int cf = CF(uregs->eflags);
-              const unsigned long long int zf = ZF(uregs->eflags);
-
-              tnt = ((cf == 0llu) && (zf == 0llu)) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JNL: {
-              const unsigned long long int sf = SF(uregs->eflags);
-              const unsigned long long int of = OF(uregs->eflags);
-
-              tnt = (sf == of) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JNLE: {
-              const unsigned long long int zf = ZF(uregs->eflags);
-              const unsigned long long int sf = SF(uregs->eflags);
-              const unsigned long long int of = OF(uregs->eflags);
-
-              tnt = ((zf == 0llu) && (sf == of)) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JNP: {
-              const unsigned long long int pf = PF(uregs->eflags);
-
-              tnt = (pf == 0llu) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JNS: {
-              const unsigned long long int sf = SF(uregs->eflags);
-
-              tnt = (sf == 0llu) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JNZ: {
-              const unsigned long long int zf = ZF(uregs->eflags);
-
-              tnt = (zf == 0llu) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JO: {
-              const unsigned long long int of = OF(uregs->eflags);
-
-              tnt = (of == 1llu) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JP: {
-              const unsigned long long int pf = PF(uregs->eflags);
-
-              tnt = (pf == 1llu) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JS: {
-              const unsigned long long int sf = SF(uregs->eflags);
-
-              tnt = (sf == 1llu) ? (1u) : (0u);
-            } break;
-
-            case XED_ICLASS_JZ: {
-              const unsigned long long int zf = ZF(uregs->eflags);
-
-              tnt = (zf == 1llu) ? (1u) : (0u);
-            } break;
-
-            default: {
-              fprintf(stderr, "ICLASS = %d\n", i->iclass); for (;;) {}
-              tnt = 2u;
-            } break;
-          }
-
-          if (tnt <= 1u) {
-            xed_update_last_inst(uregs->rip);
-            xed_process_branches(tnt, 1u, 0llu, 0.0f, 0llu);
-          }
+          xed_process_branches(tnt, 1u, 0llu, 0.0f, 0llu);
         }
       }
       this_ctx = &ctx[ this_ctx_idx ];
@@ -895,6 +823,36 @@ void xed_ptrace_uregs(const double                         tsc,
   fprintf(branches_fp, "R :: %20.2lf FSB = %16llx\n", tsc, uregs->fs_base);
   fprintf(branches_fp, "R :: %20.2lf GSB = %16llx\n", tsc, uregs->gs_base);
 }
+
+void xed_ptrace_unwind(void* const p) {
+  const unwind_insts_t* const unwind_insts = ((unwind_insts_t*) (p));
+
+  if (unwind_insts->no_insts >= 1u) {
+    fprintf(branches_fp, "AT :: %20.2lf\n", ((double) (unwind_insts->attach_tsc)));
+
+    fprintf(branches_fp,
+            "%s\t%d [%03d] %20.2lf: cpu-clock:\n",
+            &perfed_name[ 0u ],
+            0,
+            0,
+            ((double) (unwind_insts->tsc)));
+    for (unsigned int i = 0u; i < unwind_insts->no_insts; i++) {
+      const inst_t* const inst = unwind_insts->insts[ i ];
+
+      fprintf(branches_fp,
+              "\t%16llx %08llx_%s ([%s %016llx])\n",
+              inst->addr,
+              inst->addr - inst->base_addr,
+              inst->binary,
+              inst->binary,
+              inst->dwarf_unwind->addr - inst->dwarf_unwind->base_addr);
+    }
+    fprintf(branches_fp, "\n");
+
+    fprintf(branches_fp, "DT :: %20.2lf\n", ((double) (unwind_insts->detach_tsc)));
+  }
+}
+#endif
 
 void xed_reset_call_stack(void) {
   memset(&this_ctx->call_stack[ 0u ], 0, sizeof(this_ctx->call_stack));
@@ -943,11 +901,6 @@ void xed_process_branches(const unsigned int           tnt,
   if (this_ctx->last_inst == -1ll) {
     return;
   }
-
-#if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-  //fprintf(branches_fp, "    TSC :: %20.2lf\n", tsc);
-  //fprintf(branches_fp, "    CYC :: %20llu\n", cyc_cnt);
-#endif
 
   tnt_t*       x_tnt = NULL;
   const tip_t* x_tip = NULL;
@@ -1022,7 +975,7 @@ void xed_process_branches(const unsigned int           tnt,
 #endif
       this_ctx->last_inst++;
 #if defined(PRINT_XED)
-      fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr);
+      fprintf(branches_fp, "%s -> %16llx _ :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, 0.0f);
 #endif
     } else {
       if (this_ctx->tnt_queue_tail != this_ctx->tnt_queue_head) {
@@ -1046,7 +999,7 @@ void xed_process_branches(const unsigned int           tnt,
 
       if ((insts[ this_ctx->last_inst ].cofi.type & COND_BRANCH) != 0u) {
         if (x_tnt != NULL) {
-          const unsigned int br = x_tnt->tnt & (1 << (x_tnt->tnt_len - 1u));
+          const unsigned int br = x_tnt->tnt & (1u << (x_tnt->tnt_len - 1u));
 
           x_tnt->tnt_len--;
           if (br != 0u) {
@@ -1087,14 +1040,14 @@ void xed_process_branches(const unsigned int           tnt,
           branches_n++;
           xed_update_last_inst(insts[ this_ctx->last_inst ].cofi.u.c.addr);
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-          fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr);
+          fprintf(branches_fp, "%s -> %16llx U :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, 0.0f);
 #endif
         } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_UNCOND_BR) {
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;
           xed_update_last_inst(insts[ this_ctx->last_inst ].cofi.u.j.addr);
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-          fprintf(branches_fp, "%s -> %16llx\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr);
+          fprintf(branches_fp, "%s -> %16llx U :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, 0.0f);
 #endif
         } else {
           // What to do in this case?!
@@ -1103,7 +1056,7 @@ void xed_process_branches(const unsigned int           tnt,
 #if defined(EN_RET_COMPRESSION)
         if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_RET) {
           if (x_tnt != NULL) {
-            const unsigned int br = x_tnt->tnt & (1 << (x_tnt->tnt_len - 1u));
+            const unsigned int br = x_tnt->tnt & (1u << (x_tnt->tnt_len - 1u));
 
             x_tnt->tnt_len--;
             if (br != 0u) {
@@ -1167,7 +1120,8 @@ void xed_process_branches(const unsigned int           tnt,
                   const double tsc_rc = tsc_r - tsc_c;
 
                   if (tsc_rc < 0.0f) {
-                    xed_close(); fprintf(stderr, "0 Broken call stack :: Negative call time %20.2lf\n", tsc_rc); for (;;) {}
+                    //xed_close();
+                    fprintf(stderr, "0 Broken call stack :: Negative call time %20.2lf %20.2lf => %20.2lf\n", tsc_c, tsc_r, tsc_rc); //for (;;) {}
                   }
                 }
               }
@@ -1217,7 +1171,8 @@ void xed_process_branches(const unsigned int           tnt,
                   const double tsc_rc = tsc_r - tsc_c;
 
                   if (tsc_rc < 0.0f) {
-                    xed_close(); fprintf(stderr, "1 Broken call stack :: Negative call time %20.2lf\n", tsc_rc); for (;;) {}
+                    //xed_close();
+                    fprintf(stderr, "1 Broken call stack :: Negative call time %20.2lf %20.2lf => %20.2lf\n", tsc_c, tsc_r, tsc_rc); //for (;;) {}
                   }
                 }
               }
@@ -1301,9 +1256,16 @@ void xed_tsc_err(const double tsc_err) {
 }
 
 const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
-  //unsigned long long int x = read_tsc();
   if (addr == 0llu) {
     return NULL;
+  }
+#if defined(EN_VMLINUX)
+  if ((addr >= 0xFFFFFFFF81000000llu) && (unwind_cache_high[ addr & CACHE_MASK ] != NULL) && (unwind_cache_high[ addr & CACHE_MASK ]->addr == addr)) {
+    return unwind_cache_high[ addr & CACHE_MASK ];
+  }
+#endif
+  if ((unwind_cache_low[ addr & CACHE_MASK ] != NULL) && (unwind_cache_low[ addr & CACHE_MASK ]->addr == addr)) {
+    return unwind_cache_low[ addr & CACHE_MASK ];
   }
 
   signed long long int        a = 0ll;
@@ -1312,7 +1274,6 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
 
   if (m != 0ll) {
     if ((insts[ m ].addr <= addr) && (addr <= insts[ m ].addr + insts[ m ].length - 1llu)) {
-      //fprintf(stdout, "0 FIND TIME = %15.3lf\n", ((double) (read_tsc() - x)) * tsc_hz_ns);
       return &insts[ m ];
     } else if (insts[ m ].addr < addr) {
       a = m + 1ll;
@@ -1325,7 +1286,13 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
     m = (a + b) / 2ll;
 
     if ((insts[ m ].addr <= addr) && (addr <= insts[ m ].addr + insts[ m ].length - 1llu)) {
-      //fprintf(stdout, "1 FIND TIME = %15.3lf\n", ((double) (read_tsc() - x)) * tsc_hz_ns);
+#if defined(EN_VMLINUX)
+      if (addr >= 0xFFFFFFFF81000000llu) {
+        unwind_cache_high[ addr & CACHE_MASK ] = &insts[ m ];
+      }
+#endif
+      unwind_cache_low[ addr & CACHE_MASK ] = &insts[ m ];
+
       return &insts[ m ];
     } else if (insts[ m ].addr < addr) {
       a = m + 1ll;
@@ -1334,7 +1301,6 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
     }
   }
 
-  //fprintf(stdout, "2 FIND TIME = %15.3lf\n", ((double) (read_tsc() - x)) * tsc_hz_ns);
   return NULL;
 }
 
@@ -1377,8 +1343,8 @@ void xed_unwind_link_inst_and_dwarf(void) {
   for (unsigned long long int i = 0llu; i < no_insts; i++) {
     const unsigned long long int addr_offset = ((unsigned long long int) (insts[ i ].length)) - 1llu;
 
-    insts[ i ].unwind = xed_unwind_find_dwarf(insts[ i ].addr + addr_offset);
-    if (insts[ i ].unwind == NULL) {
+    insts[ i ].dwarf_unwind = xed_unwind_find_dwarf(insts[ i ].addr + addr_offset);
+    if (insts[ i ].dwarf_unwind == NULL) {
 #if 0
       fprintf(stdout,
               "Unlinked unwind for instruction %16llx in %s\n",

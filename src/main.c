@@ -10,7 +10,6 @@
 #include <pthread.h>
 #include <cpuid.h>
 #include <fcntl.h>
-#include <time.h>
 #include <signal.h>
 
 #include <sys/stat.h>
@@ -20,7 +19,6 @@
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <sys/user.h>
-#include <sys/ioctl.h>
 
 #include <linux/hw_breakpoint.h>
 #include <linux/perf_event.h>
@@ -36,6 +34,10 @@
 
 #if 0
 #define PRINT_RECORD
+#endif
+
+#ifndef TASK_COMM_LEN
+#define TASK_COMM_LEN (128u)
 #endif
 
 //  /sys/bus/event_source/devices/intel_pt/type
@@ -200,15 +202,19 @@ typedef union {
     perf_record_switch_t       record_switch;
 } perf_record_t;
 
-static pid_t perfed_pid;
-static int   perfed_cpu;
-static int   perfed_msr_fd;
-static int   perfing_cpu;
-static int   perfing_fd;
+typedef enum {
+    PERFED_STATUS_RUNNING = 0,
+    PERFED_STATUS_PTRACED
+} perfed_status_t;
 
-#if defined(EN_PTRACE_UNWIND)
-static unsigned int          perfed_is_stopped;
-#endif
+perfed_status_t perfed_status = PERFED_STATUS_RUNNING;
+char            perfed_name[ TASK_COMM_LEN ];
+static pid_t    perfed_pid;
+static int      perfed_cpu;
+static int      perfed_msr_fd;
+static int      perfing_cpu;
+static int      perfing_fd;
+
 static volatile unsigned int perfing_is_running;
 
 static struct perf_event_mmap_page* perf_metadata;
@@ -234,9 +240,7 @@ static __u64 last_switch_in;
 static __u64 last_switch_out;
 
 #if defined(EN_PTRACE_UNWIND)
-static unsigned long long int  ptrace_tsc;
 static struct user_regs_struct ptrace_uregs;
-static unwind_insts_t          ptrace_unwind_insts;
 #endif
 
 static void perfed_msr(void) {
@@ -473,14 +477,13 @@ static void* perfing_main(void* args) {
         __u64        perf_record_sz = 0llu;
 
         int status;
-
-#if defined(PRINT_RECORD)
-        struct timespec a = { 0 };
-        struct timespec b = { 0 };
-        struct timespec c = { 0 };
-        signed long long int ts_0 = 0ll;
-        signed long long int ts_1 = 0ll;
-        signed long long int ts_2 = 0ll;
+        unsigned long long int intel_pt_enable_tsc;
+        unsigned long long int intel_pt_disable_tsc;
+#if defined(EN_PTRACE_UNWIND)
+        unsigned long long int perfed_attach_tsc;
+        unsigned long long int perfed_detach_tsc;
+        unsigned long long int perfed_ptrace_a;
+        unsigned long long int perfed_ptrace_b;
 #endif
 
         perfing_is_running = 1u;
@@ -501,8 +504,7 @@ static void* perfing_main(void* args) {
 
             if (perfed_pid_wait == perfed_pid) {
                 if (WIFSTOPPED(status)) {
-                    fprintf(stdout, "WSTOPSIG = %d\n", WSTOPSIG(status));
-                    ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
+                    intel_pt_enable(perfing_fd);
 
                     perfed_kmod(perfed_pid);
                     ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
@@ -516,9 +518,7 @@ static void* perfing_main(void* args) {
 #endif
 
         for (;;) {
-#if defined(PRINT_RECORD)
-            clock_gettime(CLOCK_MONOTONIC, &a);
-#endif
+            const unsigned long long int a = read_tsc();
 
             data_head = __atomic_load_n(&perf_metadata->data_head, __ATOMIC_ACQUIRE);
             if (data_tail + perf_header_sz <= data_head) {
@@ -600,44 +600,49 @@ static void* perfing_main(void* args) {
                                 aux_util_max = aux_util;
                             }
 #if defined(EN_PTRACE_UNWIND)
-                            if (perfed_is_stopped == 0u) {
+                            if ((intel_pt_status == INTEL_PT_STATUS_ENABLE) && (unwind_queue[ unwind_queue_head ].no_insts == 0u)) {
                                 long ret;
                                 int  status;
 
+                                perfed_ptrace_a = a;
                                 errno = 0;
-                                ret   = ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL);
+                                ret   = ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL); perfed_attach_tsc = a;
                                 if (ret == -1l) {
                                     fprintf(stderr, "PTRACE_ATTACH failed %s\n", strerror(errno)); for (;;) {}
                                 } else {
                                     const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
 
+                                    perfed_status = PERFED_STATUS_PTRACED;
                                     if (perfed_pid_wait == perfed_pid) {
                                         if (WIFSTOPPED(status)) {
-                                            // Safe TSC read:
-                                            //  1. perfed_pid is stopped
-                                            //  2. TSC is synchronized across all CPU cores
-                                            ptrace_tsc = read_tsc();
-                                            perfed_is_stopped = 1u;
-                                            ioctl(perfing_fd, PERF_EVENT_IOC_DISABLE, 0);
-                                            fprintf(stdout, "WSTOPSIG = %d :: ", WSTOPSIG(status));
+                                            unwind_insts_t* unwind_insts = NULL;
+
+                                            //intel_pt_disable(perfing_fd); intel_pt_disable_tsc = a;
 
                                             errno = 0;
                                             ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &ptrace_uregs);
                                             if (ret == -1l) {
                                                 fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno)); for (;;) {}
                                             } else {
-                                                unwind(perfed_pid, perfed_cpu, ((double) (ptrace_tsc)), &ptrace_uregs, &ptrace_unwind_insts);
+                                                unwind_insts = unwind(perfed_pid, &ptrace_uregs);
                                             }
                                             errno = 0;
-                                            ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
+                                            ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL); perfed_detach_tsc = read_tsc();
                                             if (ret == -1l) {
                                                 fprintf(stderr, "PTRACE_DETACH failed %s\n", strerror(errno)); for (;;) {}
                                             }
-#if defined(PRINT_RECORD)
-                                            clock_gettime(CLOCK_MONOTONIC, &b);
-                                            ts_0 = ((signed long long) (b.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (b.tv_nsec - a.tv_nsec));
-                                            fprintf(stdout, "attach ts = %12lld ns\n", ts_0);
-#endif
+                                            perfed_status = PERFED_STATUS_RUNNING;
+
+                                            if (unwind_insts != NULL) {
+                                                unwind_insts->attach_tsc = perfed_attach_tsc;
+                                                unwind_insts->detach_tsc = perfed_detach_tsc;
+
+                                                fprintf(stdout,
+                                                        "attach = %12.2lf us :: l_ptrace = %12.2lf ms\n",
+                                                        ((double) (perfed_detach_tsc - perfed_attach_tsc)) * tsc_hz_ns / 1000.0f,
+                                                        ((double) (perfed_ptrace_a - perfed_ptrace_b)) * tsc_hz_ns / 1000000.0f);
+                                                perfed_ptrace_b = perfed_ptrace_a;
+                                            }
                                         }
                                     } else {
                                         fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
@@ -661,6 +666,8 @@ static void* perfing_main(void* args) {
 #endif
 
                             if (perf_record->record_aux.flags == 0llu) {
+                                //unsigned long long int aux_tsc = read_tsc();
+
                                 if (((rc_aux_offset % aux_size) + rc_aux_size) >= aux_size) {
                                     __u64       j   = 0llu;
                                     const __u64 j_a = AUX_ALIGNMENT * (rc_aux_size / AUX_ALIGNMENT);
@@ -712,6 +719,12 @@ static void* perfing_main(void* args) {
                                                            aux_head,
                                                            &perf_metadata->aux_head);
                                 }
+                                //fprintf(stdout,
+                                //        "aux = %12llu %12.2lf us :: %6u %6u\n",
+                                //        rc_aux_size,
+                                //        ((double) (read_tsc() - aux_tsc)) * tsc_hz_ns / 1000.0f,
+                                //        unwind_queue_tail,
+                                //        unwind_queue_head);
 
                                 __atomic_store_n(&perf_metadata->aux_tail, rc_aux_offset + rc_aux_size, __ATOMIC_RELEASE);
                             }
@@ -774,8 +787,7 @@ static void* perfing_main(void* args) {
                                     (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? ("ON  -> OFF") : ("OFF ->  ON"),
                                     no_record_switch);
 #endif
-                            xed_tid_switch(((double) (perf_record->record_switch.id.time)) / tsc_hz_ns,
-                                           (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? (1u) : (0u));
+                            //xed_tid_switch(((double) (perf_record->record_switch.id.time)) / tsc_hz_ns, (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? (1u) : (0u));
                         } break;
 
                         default: {
@@ -783,24 +795,13 @@ static void* perfing_main(void* args) {
                         } break;
                     }
                 }
-#if defined(PRINT_RECORD)
-                clock_gettime(CLOCK_MONOTONIC, &c);
-                ts_1 = ((signed long long) (c.tv_sec - a.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - a.tv_nsec));
-                fprintf(stdout, "record ts = %12lld ns\n", ts_1);
-#endif
             } else {
 #if defined(EN_PTRACE_UNWIND)
-                if (perfed_is_stopped == 1u) {
-                    xed_ptrace_uregs(((double) (ptrace_tsc)), &ptrace_uregs);
-                    perfed_is_stopped = 0u;
-                    ioctl(perfing_fd, PERF_EVENT_IOC_ENABLE, 0);
-                    fprintf(stdout, "INTEL_PT_INACTIVE_TIME  = %20.2lf ms\n", (((double) (read_tsc() - ptrace_tsc)) * tsc_hz_ns) / 1000000.0f);
-
-#if defined(PRINT_RECORD)
-                    clock_gettime(CLOCK_MONOTONIC, &c);
-                    ts_2 = ((signed long long) (c.tv_sec - b.tv_sec)) * 1000000000ll + ((signed long long) (c.tv_nsec - b.tv_nsec));
-                    fprintf(stdout, "detach ts = %12lld ms\n", ts_2 / 1000ll / 1000ll);
-#endif
+                if (intel_pt_status == INTEL_PT_STATUS_DISABLE) {
+                    intel_pt_enable(perfing_fd); intel_pt_enable_tsc = read_tsc();
+                    fprintf(stdout,
+                            "INTEL_PT_INACTIVE_TIME = %20.2lf ms\n",
+                            ((double) (intel_pt_enable_tsc - intel_pt_disable_tsc)) * tsc_hz_ns / 1000000.0f);
                 }
 #endif
             }
@@ -822,8 +823,8 @@ static void* perfing_main(void* args) {
         fprintf(stderr, "pthread_setaffinity_np failed %s\n", strerror(ret));
     }
 
+    intel_pt_disable(perfing_fd);
     pmu_close();
-    ioctl(perfing_fd, PERF_EVENT_IOC_DISABLE, 0);
     if (munmap(perf_aux_buffer, perf_metadata->aux_size) != 0) {
         fprintf(stderr, "munmap AUX failed %s\n", strerror(errno));
     }
@@ -1022,6 +1023,18 @@ int main(int argc, char *argv[ ]) {
         brking_cpu  = atoi(argv[ 4u ]);
 #endif
 
+        if (perfed_pid >= 1) {
+            char  tmp[ TASK_COMM_LEN ];
+            FILE* fp;
+
+            snprintf(&tmp[ 0u ], sizeof(tmp), "/proc/%d/comm", perfed_pid);
+            fp = fopen(&tmp[ 0u ], "r");
+            if (fp != NULL) {
+                fscanf(fp, "%s", &perfed_name[ 0u ]);
+
+                fclose(fp);
+            }
+        }
         {
             unsigned int eax;
             unsigned int ebx;

@@ -108,7 +108,7 @@ typedef struct {
 
   cofi_t                 cofi;
 
-  const dwarf_unwind_t*  unwind;
+  const dwarf_unwind_t*  dwarf_unwind;
 } inst_t;
 
 typedef struct {
@@ -159,8 +159,11 @@ extern void xed_intel_pt_tip_disable(const double                 tsc,
 extern void xed_tid_switch(const double       tsc,
                            const unsigned int sw_out);
 
+#if defined(EN_PTRACE_UNWIND)
 extern void xed_ptrace_uregs(const double                         tsc,
                              const struct user_regs_struct* const uregs);
+extern void xed_ptrace_unwind(void* const p);
+#endif
 
 extern void xed_reset_call_stack(void);
 extern void xed_reset_last_inst(void);
