@@ -27,10 +27,14 @@
 #include "intel_pt.h"
 #include "xed.h"
 #include "proc.h"
+#if defined(EN_PMU)
 #include "pmu.h"
+#endif
 #include "kmod.h"
 #include "x_unwind.h"
+#if defined(EN_PTRACE_BRK)
 #include "brk.h"
+#endif
 
 #if 0
 #define PRINT_RECORD
@@ -600,7 +604,7 @@ static void* perfing_main(void* args) {
                                 aux_util_max = aux_util;
                             }
 #if defined(EN_PTRACE_UNWIND)
-                            if ((intel_pt_status == INTEL_PT_STATUS_ENABLE) && (unwind_queue[ unwind_queue_head ].no_insts == 0u)) {
+                            if ((perfed_status == PERFED_STATUS_RUNNING) && (intel_pt_status == INTEL_PT_STATUS_ENABLE) && (unwind_queue[ unwind_queue_head ].no_insts == 0u)) {
                                 long ret;
                                 int  status;
 
@@ -824,7 +828,9 @@ static void* perfing_main(void* args) {
     }
 
     intel_pt_disable(perfing_fd);
+#if defined(EN_PMU)
     pmu_close();
+#endif
     if (munmap(perf_aux_buffer, perf_metadata->aux_size) != 0) {
         fprintf(stderr, "munmap AUX failed %s\n", strerror(errno));
     }
@@ -835,7 +841,9 @@ static void* perfing_main(void* args) {
 
     unwind_close();
     kmod_close();
+#if defined(EN_PTRACE_BRK)
     brk_close();
+#endif
     xed_close();
     free(data_buffer);
     free(aux_buffer);
@@ -933,7 +941,9 @@ static void perfed_setup(void) {
                     perfed_unwind(perfed_pid);
                     perfed_xed(perfed_pid);
                     perfed_proc(perfed_pid, NULL);
+#if defined(EN_PMU)
                     perfed_pmu(perfed_pid, perfed_cpu, perfing_fd);
+#endif
                     perfed_msr();
 
                     fprintf(stdout, "perf_metadata->data_head   = %10llu\n", perf_metadata->data_head);

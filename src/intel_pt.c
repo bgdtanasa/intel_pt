@@ -1,5 +1,7 @@
 #include "intel_pt.h"
+#if defined(EN_PMU)
 #include "pmu.h"
+#endif
 #include "xed.h"
 #include "proc.h"
 #if defined(EN_PTRACE_UNWIND)
@@ -340,7 +342,7 @@ static void print_intel_pt_pkts(void) {
   }
 }
 
-static void reset_intel_pt_pkt(void) {
+static void reset_intel_pt_pkts(void) {
   memset(&intel_pt_pkt_hist[ 0u ], 0, sizeof(intel_pt_pkt_hist));
   intel_pt_pkt_hist_idx = 0u;
 }
@@ -482,12 +484,7 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
   intel_pt_pkt_hist_idx = (intel_pt_pkt_hist_idx + 1u) % INTEL_PT_PKT_HISTORY;
 
   if (type == INTEL_PT_PKT_TIP_PGD) {
-    reset_intel_pt_pkt();
-
-    tsc_approx_en  = 0u;
-    tsc_approx_ctc = 0llu;
-    tsc_approx_cyc = 0llu;
-    tsc_approx_ovf = 0u;
+    reset_intel_pt_pkts();
   }
 }
 
@@ -683,7 +680,6 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
     }
   } else {
     xed_intel_pt_tip_disable(tsc_approx_ref, cyc_cnt_ref);
-    xed_async_reset(ip, tsc_approx_ref, cyc_cnt_ref);
 
     if (pkt_type != INTEL_PT_PKT_TIP_PGD) {
       fprintf(stderr, "ip_decode error :: 2 ip = %16llx pkt_type = %3d\n", ip, pkt_type); for (;;) { }

@@ -1,6 +1,8 @@
 #include "xed.h"
 #include "intel_pt.h"
+#if defined(EN_PMU)
 #include "pmu.h"
+#endif
 #include "proc.h"
 #if defined(EN_PTRACE_BRK)
 #include "brk.h"
@@ -91,7 +93,7 @@ unsigned int       no_binaries;
 inst_t*            insts;
 unsigned long long no_insts;
 
-static ctx_t        ctx[ 5u ] = {
+static ctx_t        ctx[ MAX_NO_CTXS ] = {
   [ 0u ] = {
     .last_inst = -1ll
   },
@@ -108,8 +110,8 @@ static ctx_t        ctx[ 5u ] = {
     .last_inst = -1ll
   }
 };
-static ctx_t*       this_ctx  = &ctx[ 0u ];
-static unsigned int ctx_idx   = 0u;
+static ctx_t*       this_ctx           = &ctx[ 0u ];
+static unsigned int ctx_idx            = 0u;
 
 static FILE*                  branches_fp;
 static unsigned long long int branches_n;
@@ -126,6 +128,31 @@ extern char   perfed_name[ ];
 extern double tsc_hz_ns;
 extern double tsc_factor;
 extern double cbr_factor;
+
+static void xed_print_stack(void) {
+  for (unsigned int i = ctx_idx; i >= 0u ; i--) {
+    if (ctx[ i ].call_stack_idx >= 1u) {
+      const inst_t* const inst_i = &insts[ ctx[ i ].last_inst ];
+
+      fprintf(branches_fp, "\t%2u/%2c %016llx\n", i, 'x', inst_i->addr);
+
+      for (unsigned int j = ctx[ i ].call_stack_idx - 1u; j >= 0u ; j--) {
+        const inst_t* const inst_c = ctx[ i ].call_stack[ j ].call;
+        const inst_t* const inst_r = ctx[ i ].call_stack[ j ].ret;
+
+        fprintf(branches_fp, "\t%2u/%2u %016llx %016llx\n", i, j, inst_c->addr, inst_r->addr);
+
+        if (j == 0u) {
+          break;
+        }
+      }
+    }
+
+    if (i == 0u) {
+      break;
+    }
+  }
+}
 
 static inline __attribute__((always_inline)) void update_inst_stats(const xed_iclass_enum_t iclass) {
   inst_stats.iclass_cnt[ iclass ]++;
@@ -633,7 +660,11 @@ void xed_intel_pt_bip_fup(const unsigned long long int a,
                           const unsigned long long int pmu_mask,
                           const unsigned long long int mem_addr) {
   fprintf(branches_fp, "F :: %20.2lf :: %16llx -> %16llx MEM = %16llx\n", tsc, a, b, mem_addr);
+#if defined(EN_PMU)
   pmu_info(pmu_mask, branches_fp);
+#else
+  (void) (pmu_mask);
+#endif
 }
 
 void xed_intel_pt_ptw_fup(const unsigned long long int ip,
@@ -1035,6 +1066,9 @@ void xed_process_branches(const unsigned int           tnt,
             .no_insts_c = 0llu
           };
           this_ctx->call_stack_idx++;
+          if (this_ctx->call_stack_idx >= CALL_STACK_LEN) {
+            xed_close(); fprintf(stderr, "Full stack\n"); for (;;) {}
+          }
 
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;
@@ -1100,6 +1134,9 @@ void xed_process_branches(const unsigned int           tnt,
               .no_insts_c = branches_n
             };
             this_ctx->call_stack_idx++;
+            if (this_ctx->call_stack_idx >= CALL_STACK_LEN) {
+              xed_close(); fprintf(stderr, "Full stack\n"); for (;;) {}
+            }
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_UNCOND_BR) {
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_RET) {
             if (this_ctx->call_stack_idx >= 1u) {
@@ -1111,7 +1148,7 @@ void xed_process_branches(const unsigned int           tnt,
               this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = branches_n;
 
               if (ret != x_tip->tip) {
-                xed_close(); fprintf(stderr, "0 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
+                xed_print_stack(); xed_close(); fprintf(stderr, "0 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
               } else {
                 const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
                 const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
@@ -1152,6 +1189,9 @@ void xed_process_branches(const unsigned int           tnt,
               .no_insts_c = branches_n
             };
             this_ctx->call_stack_idx++;
+            if (this_ctx->call_stack_idx >= CALL_STACK_LEN) {
+              xed_close(); fprintf(stderr, "Full stack\n"); for (;;) {}
+            }
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSRET) {
             if (this_ctx->call_stack_idx >= 1u) {
               unsigned long long int ret;
@@ -1162,7 +1202,7 @@ void xed_process_branches(const unsigned int           tnt,
               this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = branches_n;
 
               if (ret != x_tip->tip) {
-                xed_close(); fprintf(stderr, "1 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
+                xed_print_stack(); xed_close(); fprintf(stderr, "1 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
               } else {
                 const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
                 const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
@@ -1241,6 +1281,9 @@ void xed_async_enter(const unsigned long long int tip,
     fflush(branches_fp); for (;;) {}
   }
   ctx_idx++;
+  if (ctx_idx >= MAX_NO_CTXS) {
+    xed_close(); fprintf(stderr, "Full ctxs\n"); for (;;) {}
+  }
   this_ctx = &ctx[ ctx_idx ];
   fprintf(branches_fp, "Async Enter :: %20.2lf %16llx\n", tsc, tip);
 }

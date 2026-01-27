@@ -78,7 +78,7 @@ pfn_again:
 
 #if defined(EN_VMLINUX)
 static void update_modules(void) {
-    FILE* fp = fopen("resources/modules_addrs", "r");
+    FILE* const fp = fopen("resources/modules_addrs", "r");
 
     if (fp != NULL) {
         unsigned long long int a;
@@ -90,7 +90,7 @@ static void update_modules(void) {
             const int n = fscanf(fp, "%s %llx %llx\n", &name[ 0u ], &a, &b);
 
             if (n == 3) {
-                const char* binary = parse_get_binary(&name[ 0u ], 1u);
+                const char* const binary = parse_get_binary(&name[ 0u ], 1u);
 
                 fprintf(stdout, "%llx %llx %64s :: no_binaries = %9u\n", a, b, &name[ 0u ], no_binaries);
                 for (unsigned long long int i = 0llu; i < no_insts; i++) {

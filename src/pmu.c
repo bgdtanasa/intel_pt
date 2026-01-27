@@ -17,10 +17,8 @@
 #define PRINT_PMU
 #endif
 
-#if defined(EN_PMU)
 #if 0
 define EN_GEN_PMU
-#endif
 #endif
 
 #define PMU_PDIST_PERIOD (128llu)
@@ -51,7 +49,6 @@ typedef struct {
 
 static pmu_t pmus[ 64u ];
 
-#if defined(EN_PMU)
 static const char* get_pmu_name(const __u64 config) {
   switch (config) {
     case FIXED_PMU_INST_RETIRED_ANY: {
@@ -198,10 +195,8 @@ static int install_pmu(const __u64        config,
 
   return pmu_fd;
 }
-#endif
 
 void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt_fd) {
-#if defined(EN_PMU)
   int cnt_fd;
 
   fprintf(stdout, "====== PMU ======\n");
@@ -224,11 +219,6 @@ void perfed_pmu(const pid_t perfed_pid, const int perfed_cpu, const int intel_pt
   fprintf(stdout, "====== PMU ======\n");
 
   (void) (cnt_fd);
-#else
-  (void) (perfed_pid);
-  (void) (perfed_cpu);
-  (void) (intel_pt_fd);
-#endif
 }
 
 void pmu_info(const unsigned long long int pmu_mask, FILE* fp) {

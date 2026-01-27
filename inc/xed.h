@@ -13,10 +13,10 @@
 
 #include <sys/user.h>
 
-#if 0
+#if 1
 #define PRINT_XED
 #else
-#if 1
+#if 0
 #define PRINT_XED_BRANCHES_ONLY
 #endif
 #endif
@@ -35,6 +35,7 @@
 #define MAX_NO_BINARIES   (512u)
 #define MAX_BINARY_LENGTH (256u)
 #define MAX_NO_INSTS      (70000000llu)
+#define MAX_NO_CTXS       (5u)
 
 typedef enum {
   CFA_RULE_NONE,

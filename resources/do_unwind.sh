@@ -17,48 +17,53 @@ awk -v pid="${PID}" -v pid_name="${PID_NAME}" -v pid_cpu="${PID_CPU}" '
 		if (f == 0) {
 			if (index($0, pid_name "\t0 [000] ")) {
 				# The ptrace unwind starts here
-				f = 1;
-				n = 0;
+				f = 1
+				n = 0
 			} else {
-				f = 0;
-				n = 0;
+				f = 0
+				n = 0
 			}
 		} else if (f == 1) {
 			if ($0 == "") {
 				# The ptrace unwind stops here
-				f = 2;
+				f = 2
 
 				# The ptrace unwind needs to be reversed
 				for (i = 1; i <= int(n / 2); i++) {
-					a = stk[ i ];
-					stk[ i ] = stk[ n - i + 1 ];
-					stk[ n - i + 1 ] = a;
+					a = stk[ i ]
+					stk[ i ] = stk[ n - i + 1 ]
+					stk[ n - i + 1 ] = a
 				}
 			} else {
 				# Recording the ptrace unwind
-				n++;
-				stk[ n ] = $1;
+				n++
+				stk[ n ] = $1
 			}
-		} else if (f == 2) {
+		} else if (f >= 2) {
 			if ((index($0, "O ::   ")) || (index($0, "D ::   "))) {
 				# Reseting the call stack
-				f = 0;
-				n = 0;
+				f = 0
+				n = 0
 			} else if (index($0, " -> ")) {
-				# Updating the call stack
-				if (index($7, "CALL")) {
-					n++;
-					stk[ n ] = $9
-				} else if (index($7, "RET")) {
-					if (n >= 1) {
-						# Printing the call stack
-						print pid_name "\t" pid " [" pid_cpu "] " $12 ": cpu-clock:"
-						for (i = n; i >= 1; i--) {
-							print "\t" stk[ i ] " " stk[ i ] " ([xxxxxx])"
-						}
-						print ""
+				if (f == 3) {
+					if (index($7, "CALL")) {
+						n++
+						stk[ n ] = $9
+					} else if (index($7, "RET")) {
+						if (n >= 1) {
+							# Printing the call stack
+							print pid_name "\t" pid " [" pid_cpu "] " $12 ": cpu-clock:"
+							for (i = n; i >= 1; i--) {
+								print "\t" stk[ i ] " " stk[ i ] " ([xxxxxx])"
+							}
+							print ""
 
-						n--;
+							n--
+						}
+					}
+				} else {
+					if ($4 == stk[ n ]) {
+						f = 3
 					}
 				}
 			}
@@ -70,29 +75,42 @@ echo "Generating the raw unwind file ... Done"
 rm -rf ${RESOURCES_PATH}/../unwind.log.x
 if [[ -f "addr2line.${PID}.1" && -s "addr2line.${PID}.1" ]];
 then
-	awk '{print $4 " " $6 " " $9 " " $10}' addr2line.${PID}.1 | sort -k 1 -n | uniq > addr2line.${PID}.all
+	awk '
+		{
+			if (NF == 10) {
+				print $4 " " $6 " " $7 " " $8 " " $9
+			} if (NF == 11) {
+				print $4 " " $6 " " $7 " " $9 " " $10
+			}
+		}
+	' addr2line.${PID}.1 | sort -k 1 -n | uniq > addr2line.${PID}.all
+
 	awk '
 		NR==FNR {
-			k = $1
-
-			a[ k, "a_0" ] = $1
-			a[ k, "a_1" ] = $2
-			a[ k, "f" ] = $3
-			a[ k, "b" ] = $4
-			
-			x[ $2 ] = k
+			u[ $1, "x" ] = $1
+			u[ $1, "y" ] = $2
+			u[ $1, "c" ] = $3
+			u[ $1, "f" ] = $4
+			u[ $1, "b" ] = $5
 			next
-		} {
+		}
+
+		{
 			if (NF == 3) {
-				if (($1, "a_0") in a) {
-					k = $1
-					printf("\t%16s %s ([%s])\n", a[ k, "a_0" ], a[ k, "f" ], a[ k, "b" ])
-				} else if ($1 in x) {
-					k = x[ $1 ]
-					printf("\t%16s %s ([%s])\n", a[ k, "a_1" ], a[ k, "f" ], a[ k, "b" ])
+				k = $1
+
+				if ((k, "x") in u) {
+					c = u[ k, "c" ]
+					f = u[ k, "f" ]
+					b = u[ k, "b" ]
+					x = u[ k, "x" ]
+					y = u[ k, "y" ]
 				} else {
-					printf("\t%16s %s ([xxxxxx])\n", $1, $1)
+					printf "\t%16s %s ([xxxxxx])\n", k, k
+					next
 				}
+				printf "\t%16s %s ([%s])\n", k, f, b
+				next
 			} else {
 				print $0
 			}

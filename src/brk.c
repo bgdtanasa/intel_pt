@@ -40,10 +40,6 @@ unsigned int no_brks             = 0u;
 int          brking_cpu;
 unsigned     brking_done         = 0u;
 
-//static unsigned long long int  ptrace_tsc;
-//static struct user_regs_struct ptrace_uregs;
-//static unwind_insts_t          ptrace_unwind_insts;
-
 static void* brking_main(void* args) {
   const int perfed_pid = *((int*) (args));
 
