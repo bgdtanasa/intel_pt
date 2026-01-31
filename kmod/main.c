@@ -41,9 +41,11 @@ MODULE_AUTHOR("Bogdan Tanasa");
 MODULE_LICENSE("GPL");
 
 static int           perfed_pid;
+static unsigned long perfed_pgd;
 static unsigned long kmaps;
 static unsigned long no_kmaps;
 module_param(perfed_pid, int,   0644);
+module_param(perfed_pgd, ulong, 0644);
 module_param(kmaps,      ulong, 0644);
 module_param(no_kmaps,   ulong, 0644);
 
@@ -186,9 +188,12 @@ static int do_kmaps(void) {
     struct mm_struct* perfed_mm   = get_task_mm(perfed_task);
     unsigned long     s_brk       = perfed_mm->start_brk;
     unsigned long     e_brk       = perfed_mm->brk;
+    unsigned long     pgd         = __pa(perfed_mm->pgd);
 
     printk(KERN_INFO "HEAP :: %016lx %16lx", s_brk, e_brk);
-    printk(KERN_INFO " PGD :: %016lx", __pa(perfed_mm->pgd));
+    printk(KERN_INFO " PGD :: %016lx", pgd);
+    (void) copy_to_user((void*) (perfed_pgd), &pgd, sizeof(pgd));
+
     no_pages = 0u;
     if (perfed_mm != NULL) {
       struct vm_area_struct* perfed_vma;

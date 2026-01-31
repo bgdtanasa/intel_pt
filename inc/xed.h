@@ -16,7 +16,7 @@
 #if 1
 #define PRINT_XED
 #else
-#if 0
+#if 1
 #define PRINT_XED_BRANCHES_ONLY
 #endif
 #endif
@@ -36,6 +36,8 @@
 #define MAX_BINARY_LENGTH (256u)
 #define MAX_NO_INSTS      (70000000llu)
 #define MAX_NO_CTXS       (5u)
+
+#define SW_UTIL_QUEUE_LEN (1u * 1024u)
 
 typedef enum {
   CFA_RULE_NONE,
@@ -122,6 +124,12 @@ typedef struct {
   unsigned long long int no_insts_r;
 } call_stack_t;
 
+typedef struct {
+  unsigned long long int tsc;
+  unsigned int           out;
+  double                 util;
+} sw_util_t;
+
 #if defined(EN_PTRACE_UNWIND)
 extern dwarf_unwind_t*    unwinds;
 extern unsigned long long no_unwinds;
@@ -131,6 +139,10 @@ extern unsigned int       no_binaries;
 extern inst_t*            insts;
 extern unsigned long long no_insts;
 
+extern sw_util_t    sw_util_queue[ SW_UTIL_QUEUE_LEN ];
+extern unsigned int sw_util_queue_head;
+extern unsigned int sw_util_queue_tail;
+
 extern const char* parse_get_binary(const char* const xed_file, const unsigned int add_file);
 #if defined(EN_PTRACE_UNWIND)
 extern void        parse_dwarf(const char* const xed_file, const unsigned long long int base_addr);
@@ -139,6 +151,11 @@ extern void        parse_objdump(const int perfed_pid, const char* const xed_fil
 
 extern void perfed_xed(const int perfed_pid);
 
+extern void xed_intel_pt_ovf(const double                 tsc,
+                             const unsigned long long int cyc_cnt);
+extern void xed_intel_pt_pip(const unsigned long long int pgd,
+                             const double                 tsc,
+                             const unsigned long long int cyc_cnt);
 extern void xed_intel_pt_ovf_fup(const unsigned long long int ip,
                                  const double                 tsc,
                                  const unsigned long long int cyc_cnt);
@@ -157,8 +174,7 @@ extern void xed_intel_pt_ptw_fup(const unsigned long long int ip,
 extern void xed_intel_pt_tip_disable(const double                 tsc,
                                      const unsigned long long int cyc_cnt);
 
-extern void xed_tid_switch(const double       tsc,
-                           const unsigned int sw_out);
+extern void xed_tid_switch(const sw_util_t* const sw_util);
 
 #if defined(EN_PTRACE_UNWIND)
 extern void xed_ptrace_uregs(const double                         tsc,
@@ -166,8 +182,6 @@ extern void xed_ptrace_uregs(const double                         tsc,
 extern void xed_ptrace_unwind(void* const p);
 #endif
 
-extern void xed_reset_call_stack(void);
-extern void xed_reset_last_inst(void);
 extern void xed_update_last_inst(const unsigned long long addr);
 extern void xed_process_branches(const unsigned int           tnt,
                                  const unsigned int           tnt_len,

@@ -7,10 +7,28 @@ fi
 export PID=$1
 
 PID_NAME=$(grep Name /proc/${PID}/status | awk '{print $2}')
+if [[ -z "$PID_NAME" ]];
+then
+	PID_NAME="my_pid"
+fi
 PID_CPU=$(grep Cpus_allowed_list /proc/${PID}/status | awk '{print $2}')
+if [[ -z "$PID_CPU" ]];
+then
+	PID_CPU="0"
+fi
 
 rm -rf ${RESOURCES_PATH}/../unwind.log
 awk -v pid="${PID}" -v pid_name="${PID_NAME}" -v pid_cpu="${PID_CPU}" '
+	function print_stk(n, stk, tsc) {
+		if (n >= 1) {
+			# Printing the call stack
+			print pid_name "\t" pid " [" pid_cpu "] " tsc ": cpu-clock:"
+			for (i = n; i >= 1; i--) {
+				print "\t" stk[ i ] " " stk[ i ] " ([xxxxxx])"
+			}
+			print ""
+		}
+	}
 	BEGIN {
 		f = 0
 	} {
@@ -34,6 +52,7 @@ awk -v pid="${PID}" -v pid_name="${PID_NAME}" -v pid_cpu="${PID_CPU}" '
 					stk[ i ] = stk[ n - i + 1 ]
 					stk[ n - i + 1 ] = a
 				}
+				print_stk(n, stk, 0)
 			} else {
 				# Recording the ptrace unwind
 				n++
@@ -41,24 +60,27 @@ awk -v pid="${PID}" -v pid_name="${PID_NAME}" -v pid_cpu="${PID_CPU}" '
 			}
 		} else if (f >= 2) {
 			if ((index($0, "O ::   ")) || (index($0, "D ::   "))) {
+				#print "Stack Reset"
+				#print_stk(n, stk, 0)
+
 				# Reseting the call stack
 				f = 0
 				n = 0
 			} else if (index($0, " -> ")) {
 				if (f == 3) {
-					if (index($7, "CALL")) {
+					if (index($7, "SYSCALL")) {
+						#print "Going into the kernel via syscall"
+					}
+					if (index($7, "CLAC")) {
+						#print "Going into the kernel via async event"
+					}
+					if ((index($7, "CALL")) || (index($7, "SYSCALL")) || (index($7, "CLAC"))) {
 						n++
 						stk[ n ] = $9
-					} else if (index($7, "RET")) {
+					} else if ((index($7, "RET")) || (index($7, "SYSRET")) || (index($7, "IRET"))) {
 						if (n >= 1) {
-							# Printing the call stack
-							print pid_name "\t" pid " [" pid_cpu "] " $12 ": cpu-clock:"
-							for (i = n; i >= 1; i--) {
-								print "\t" stk[ i ] " " stk[ i ] " ([xxxxxx])"
-							}
-							print ""
-
 							n--
+							print_stk(n, stk, $12)
 						}
 					}
 				} else {
@@ -73,7 +95,7 @@ awk -v pid="${PID}" -v pid_name="${PID_NAME}" -v pid_cpu="${PID_CPU}" '
 echo "Generating the raw unwind file ... Done"
 
 rm -rf ${RESOURCES_PATH}/../unwind.log.x
-if [[ -f "addr2line.${PID}.1" && -s "addr2line.${PID}.1" ]];
+if [[ -f "addr2lines/addr2line.${PID}.1" && -s "addr2lines/addr2line.${PID}.1" ]];
 then
 	awk '
 		{
@@ -83,7 +105,7 @@ then
 				print $4 " " $6 " " $7 " " $9 " " $10
 			}
 		}
-	' addr2line.${PID}.1 | sort -k 1 -n | uniq > addr2line.${PID}.all
+	' addr2lines/addr2line.${PID}.1 | sort -k 1 -n | uniq > addr2lines/addr2line.${PID}.all
 
 	awk '
 		NR==FNR {
@@ -115,7 +137,7 @@ then
 				print $0
 			}
 		}
-	' addr2line.${PID}.all ${RESOURCES_PATH}/../unwind.log > ${RESOURCES_PATH}/../unwind.log.x
+	' addr2lines/addr2line.${PID}.all ${RESOURCES_PATH}/../unwind.log > ${RESOURCES_PATH}/../unwind.log.x
 
 	echo "Generating the modified unwind file ... Done"
 fi

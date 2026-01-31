@@ -10,6 +10,7 @@
 
 #define MAX_SZ_PARAMS (512u)
 
+unsigned long         perfed_pgd;
 kmaps_t               kmaps;
 unsigned long         no_kmaps;
 volatile unsigned int no_new_a_maps;
@@ -30,10 +31,14 @@ void perfed_kmod(const int perfed_pid) {
     long ret;
 
     // Fault this memory to help the kernel module
+    perfed_pgd = 0lu;
     memset(&kmaps[ 0u ], 0, sizeof(kmaps));
+    no_kmaps = 0lu;
+    // Prepare the list of parameters
     sprintf(&module_params[ 0u ],
-            "perfed_pid=%d kmaps=%lu no_kmaps=%lu",
+            "perfed_pid=%d perfed_pgd=%lu kmaps=%lu no_kmaps=%lu",
             perfed_pid,
+            ((unsigned long) (&perfed_pgd)),
             ((unsigned long) (&kmaps[ 0u ])),
             ((unsigned long) (&no_kmaps)));
     ret = syscall(SYS_finit_module, fd, module_params, 0);
@@ -46,6 +51,7 @@ void perfed_kmod(const int perfed_pid) {
                 "open(/dev/my_char-0) failed :: %s\n",
                 strerror(errno)); for (;;) {}
       }
+      fprintf(stdout, "perfed_pgd = %16lx\n", perfed_pgd);
       fprintf(stdout,
               "my_char_fd = %d no_kmaps = %lu no_new_a_maps = %2u\n",
               my_char_fd,

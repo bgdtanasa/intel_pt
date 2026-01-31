@@ -1,7 +1,9 @@
 .vscode
 
-resources/objdump*
-resources/dwarf*
+resources/objdumps/objdump*
+resources/dwarfs/dwarf*
+resources/insts/insts*
+resources/addr2lines/addr2line*
 resources
 
 src/*.d

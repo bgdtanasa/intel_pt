@@ -23,8 +23,8 @@ function my_sed() {
     sed -i 's/undefined/X/g' $1
 }
 
-rm -rf objdump.*
-rm -rf dwarf.*
+rm -rf objdumps/objdump.*
+rm -rf dwarfs/dwarf.*
 
 U=$(grep "r[-w]x[sp]" /proc/$1/maps | awk '{print $6}')
 
@@ -35,9 +35,9 @@ do
         a=$(basename $l)
         echo "Generating resources for $l"
 
-        objdump -d $l | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.$a
-        llvm-dwarfdump --debug-frame $l | grep "  0x" | sort -k 1 -g > dwarf.$a
-        my_sed dwarf.$a
+        objdump -d $l | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdumps/objdump.$a
+        llvm-dwarfdump --debug-frame $l | grep "  0x" | sort -k 1 -g > dwarfs/dwarf.$a
+        my_sed dwarfs/dwarf.$a
     else
         echo "Invalid resource $l"
     fi
@@ -59,8 +59,8 @@ then
     l="vmlinux"
     a=$(basename $l)
     echo "Generating resources for $l"
-    objdump -d --start-address=0x${START_ADDR} --stop-address=0x${STOP_ADDR} /proc/kcore | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdump.$a
-    touch dwarf.$a
+    objdump -d --start-address=0x${START_ADDR} --stop-address=0x${STOP_ADDR} /proc/kcore | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdumps/objdump.$a
+    touch dwarfs/dwarf.$a
 
     awk '{
         for (i = 1; i <= NF; i++) {

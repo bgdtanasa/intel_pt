@@ -4,6 +4,7 @@
 #endif
 #include "xed.h"
 #include "proc.h"
+#include "kmod.h"
 #if defined(EN_PTRACE_UNWIND)
 #include "x_unwind.h"
 #endif
@@ -454,6 +455,29 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
     tsc_approx_ref_prev = 0.0f;
   }
 
+  {
+    sw_util_t* const sw_util = &sw_util_queue[ sw_util_queue_tail ];
+
+    if ((sw_util->tsc != 0llu) && (tsc_approx_ref >= sw_util->tsc)) {
+      xed_tid_switch(sw_util);
+
+      memset(sw_util, 0, sizeof(sw_util_t));
+      sw_util_queue_tail = (sw_util_queue_tail + 1u) % SW_UTIL_QUEUE_LEN;
+    }
+  }
+#if defined(EN_PTRACE_UNWIND)
+  {
+    unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
+
+    if ((unwind_insts->no_insts >= 1u) && (unwind_insts->tsc != 0llu) && (tsc_approx_ref >= ((double) (unwind_insts->tsc)))) {
+      xed_ptrace_unwind(unwind_insts);
+
+      memset(unwind_insts, 0, sizeof(unwind_insts_t));
+      unwind_queue_tail = (unwind_queue_tail + 1u) % UNWIND_QUEUE_LEN;
+    }
+  }
+#endif
+
 #if defined(PRINT_PT)
   fprintf(stdout,
           PRINT_FORMAT "%5u %16.2lf %16llu %20.2lf :: %16llu :: %16llx \e[0;31m%8.2lf\e[0m\n",
@@ -630,19 +654,6 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   *x = x_p;
   *n = n_p;
 
-#if defined(EN_PTRACE_UNWIND)
-  {
-    unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
-
-    if ((unwind_insts->no_insts >= 1u) && (unwind_insts->tsc != 0llu) && (tsc_approx_ref >= ((double) (unwind_insts->tsc)))) {
-      xed_ptrace_unwind(unwind_insts);
-
-      memset(unwind_insts, 0, sizeof(unwind_insts_t));
-      unwind_queue_tail = (unwind_queue_tail + 1u) % UNWIND_QUEUE_LEN;
-    }
-  }
-#endif
-
 #if defined(PRINT_PT)
   fprintf(stdout, "IP            = %20llx\n", ip);
 #endif
@@ -779,14 +790,13 @@ decode_again:
 
       last_bep_fup = 0u;
 
-      // An OVF always resets the async
-      xed_async_reset(0llu, 0.0f, 0llu);
-
 #if defined(PRINT_PT)
       fprintf(stdout, "     OVF      = %20u\n", 0u);
 #endif
 
       record_intel_pt_pkt(INTEL_PT_PKT_OVF, 0llu, cyc_cnt_ref, x, n);
+      xed_intel_pt_ovf(tsc_approx_ref, cyc_cnt_ref);
+      xed_async_reset(0llu, tsc_approx_ref, cyc_cnt_ref);
       x += 2llu;
       n -= 2llu;
       goto decode_again;
@@ -892,7 +902,7 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 8llu) && (*x_16 == PIP)) {
-      const unsigned long long int cr3 = (((unsigned long long int) (x[ 7u ])) << 44llu) |
+      const unsigned long long int pgd = (((unsigned long long int) (x[ 7u ])) << 44llu) |
                                          (((unsigned long long int) (x[ 6u ])) << 36llu) |
                                          (((unsigned long long int) (x[ 5u ])) << 28llu) |
                                          (((unsigned long long int) (x[ 4u ])) << 20llu) |
@@ -900,10 +910,14 @@ decode_again:
                                          (((unsigned long long int) (x[ 2u ])) <<  4llu);
 
 #if defined(PRINT_PT)
-      fprintf(stdout, "PIP           = %20llx\n", cr3);
+      fprintf(stdout, "PIP           = %20llx\n", pgd);
 #endif
 
-      record_intel_pt_pkt(INTEL_PT_PKT_PIP, cr3, cyc_cnt_ref, x, n);
+      record_intel_pt_pkt(INTEL_PT_PKT_PIP, pgd, cyc_cnt_ref, x, n);
+      xed_intel_pt_pip(pgd, tsc_approx_ref, cyc_cnt_ref);
+      if (pgd != ((unsigned long long int) (perfed_pgd))) {
+        xed_async_reset(0llu, tsc_approx_ref, cyc_cnt_ref);
+      }
       x += 8llu;
       n -= 8llu;
       goto decode_again;

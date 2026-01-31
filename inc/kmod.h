@@ -12,6 +12,7 @@ typedef struct __attribute__ ((__packed__)) {
 
 typedef kmap_t kmaps_t[ MAX_NO_KMAPS ];
 
+extern unsigned long         perfed_pgd;
 extern kmaps_t               kmaps;
 extern unsigned long         no_kmaps;
 extern volatile unsigned int no_new_a_maps;

@@ -44,6 +44,11 @@
 #define TASK_COMM_LEN (128u)
 #endif
 
+#if defined(CLOCK_TSC)
+#undef CLOCK_TSC
+#endif
+#define CLOCK_TSC (20)
+
 //  /sys/bus/event_source/devices/intel_pt/type
 #define INTEL_PT_TYPE              ((__u32) (10u))
 // /sys/bus/event_source/devices/intel_pt/format/*
@@ -89,7 +94,7 @@
 
 #define MMAP_DATA_NO_PAGES (12llu)
 #define MMAP_SIZE          ((1llu + (1llu << (MMAP_DATA_NO_PAGES))) * (ONE_PAGE))
-#define MMAP_AUX_NO_PAGES  (18llu)
+#define MMAP_AUX_NO_PAGES  (19llu)
 #define MMAP_AUX_SIZE      ((1llu << (MMAP_AUX_NO_PAGES)) * (ONE_PAGE))
 
 #define DATA_BUFFER_SIZE (N_MB(2llu))
@@ -190,12 +195,18 @@ typedef struct {
 
 typedef struct {
     __u64       lost;
-    sample_id_t sample_id;
+    sample_id_t id;
 } perf_record_lost_samples_t;
 
 typedef struct {
     sample_id_t id;
 } perf_record_switch_t;
+
+typedef struct {
+    __u32       next_prev_pid;
+    __u32       next_prev_tid;
+    sample_id_t id;
+} perf_record_switch_wide_t;
 
 typedef union {
     perf_record_lost_t         record_lost;
@@ -204,6 +215,7 @@ typedef union {
     perf_record_itrace_start_t record_itrace_start;
     perf_record_lost_samples_t record_lost_samples;
     perf_record_switch_t       record_switch;
+    perf_record_switch_wide_t  record_switch_wide;
 } perf_record_t;
 
 typedef enum {
@@ -469,9 +481,9 @@ static void* perfing_main(void* args) {
 
         double aux_util     = 0.0f;
         double aux_util_max = 0.0f;
-#if defined(PRINT_RECORD)
-        double switch_util  = 0.0f;
-#endif
+
+        double      switch_util = 0.0f;
+        sample_id_t switch_id   = { 0 };
 
         const __u64  data_size      = perf_metadata->data_size;
         __u64        data_tail      = __atomic_load_n(&perf_metadata->data_tail, __ATOMIC_ACQUIRE);
@@ -508,8 +520,6 @@ static void* perfing_main(void* args) {
 
             if (perfed_pid_wait == perfed_pid) {
                 if (WIFSTOPPED(status)) {
-                    intel_pt_enable(perfing_fd);
-
                     perfed_kmod(perfed_pid);
                     ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
                 }
@@ -521,6 +531,7 @@ static void* perfing_main(void* args) {
         perfed_brks(perfed_pid);
 #endif
 
+        intel_pt_enable(perfing_fd); intel_pt_enable_tsc = read_tsc(); fprintf(stdout, "Running Intel PT at %20.2lf ...\n", ((double) (intel_pt_enable_tsc)));
         for (;;) {
             const unsigned long long int a = read_tsc();
 
@@ -543,6 +554,10 @@ static void* perfing_main(void* args) {
 
                     switch (perf_header.type) {
                         case PERF_RECORD_LOST: {
+                            if (perf_record->record_lost.sample_id.tid != ((__u32) (perfed_pid))) {
+                                break;
+                            }
+
                             no_record_lost++;
                             fprintf(stdout,
                                     "        RECORD_LOST :: %20llu %12llu %12llu :: %6u\n",
@@ -556,6 +571,10 @@ static void* perfing_main(void* args) {
 #pragma GCC diagnostic ignored "-Wzero-length-bounds"
 #pragma GCC diagnostic ignored "-Wstringop-overread"
                         case PERF_RECORD_MMAP2: {
+                            if (perf_record->record_mmap2.id.tid != ((__u32) (perfed_pid))) {
+                                break;
+                            }
+
                             fprintf(stdout,
                                     "       RECORD_MMAP2 :: %16llx - %16llx %c%c%c%c %s\n",
                                     perf_record->record_mmap2.addr,
@@ -670,8 +689,6 @@ static void* perfing_main(void* args) {
 #endif
 
                             if (perf_record->record_aux.flags == 0llu) {
-                                //unsigned long long int aux_tsc = read_tsc();
-
                                 if (((rc_aux_offset % aux_size) + rc_aux_size) >= aux_size) {
                                     __u64       j   = 0llu;
                                     const __u64 j_a = AUX_ALIGNMENT * (rc_aux_size / AUX_ALIGNMENT);
@@ -723,12 +740,6 @@ static void* perfing_main(void* args) {
                                                            aux_head,
                                                            &perf_metadata->aux_head);
                                 }
-                                //fprintf(stdout,
-                                //        "aux = %12llu %12.2lf us :: %6u %6u\n",
-                                //        rc_aux_size,
-                                //        ((double) (read_tsc() - aux_tsc)) * tsc_hz_ns / 1000.0f,
-                                //        unwind_queue_tail,
-                                //        unwind_queue_head);
 
                                 __atomic_store_n(&perf_metadata->aux_tail, rc_aux_offset + rc_aux_size, __ATOMIC_RELEASE);
                             }
@@ -749,24 +760,41 @@ static void* perfing_main(void* args) {
                         } break;
 
                         case PERF_RECORD_LOST_SAMPLES: {
+                            if (perf_record->record_lost_samples.id.tid != ((__u32) (perfed_pid))) {
+                                break;
+                            }
+
 #if defined(PRINT_RECORD)
                             fprintf(stdout,
                                     "RECORD_LOST_SAMPLES :: %20llu %12.3lf ns\n",
-                                    perf_record->record_lost_samples.sample_id.time,
+                                    perf_record->record_lost_samples.id.time,
                                     ((double) (perf_record->record_lost_samples.lost)) * tsc_hz_ns);
 #endif
                         } break;
 
                         case PERF_RECORD_SWITCH: {
-                            switch_ref = perf_record->record_switch.id.time;
+                            memcpy(&switch_id, &perf_record->record_switch.id, sizeof(sample_id_t));
+                            if (switch_id.tid != ((__u32) (perfed_pid))) {
+                                break;
+                            }
+
+                            goto do_switch_util;
+                        } break;
+
+                        case PERF_RECORD_SWITCH_CPU_WIDE: {
+                            memcpy(&switch_id, &perf_record->record_switch_wide.id, sizeof(sample_id_t));
+                            if (switch_id.tid != ((__u32) (perfed_pid))) {
+                                break;
+                            }
+
+do_switch_util:
+                            switch_ref = switch_id.time;
                             if (no_record_switch == 0u) {
                                 switch_in       = 0llu;
                                 last_switch_out = switch_ref;
                                 switch_out      = 0llu;
                                 last_switch_in  = switch_ref;
-#if defined(PRINT_RECORD)
                                 switch_util     = 0.0f;
-#endif
                             } else {
                                 if (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) {
                                     switch_in       += switch_ref - last_switch_in;
@@ -775,23 +803,30 @@ static void* perfing_main(void* args) {
                                     switch_out      += switch_ref - last_switch_out;
                                     last_switch_in   = switch_ref;
                                 }
-#if defined(PRINT_RECORD)
                                 switch_util = ((double) (switch_in)) / ((double) (switch_in + switch_out));
-#endif
                             }
 
                             no_record_switch++;
 #if defined(PRINT_RECORD)
                             fprintf(stdout,
                                     "      RECORD_SWITCH :: %20llu %12u %12u \e[0;31m%12.5lf\e[0m %14s :: %6u\n",
-                                    perf_record->record_switch.id.time,
-                                    perf_record->record_switch.id.cpu,
-                                    perf_record->record_switch.id.tid,
+                                    switch_id.time,
+                                    switch_id.cpu,
+                                    switch_id.tid,
                                     switch_util,
-                                    (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? ("ON  -> OFF") : ("OFF ->  ON"),
+                                    (perf_header.misc & (PERF_RECORD_MISC_SWITCH_OUT | PERF_RECORD_MISC_SWITCH_OUT_PREEMPT)) ? ("ON  -> OFF") : ("OFF ->  ON"),
                                     no_record_switch);
 #endif
-                            //xed_tid_switch(((double) (perf_record->record_switch.id.time)) / tsc_hz_ns, (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) ? (1u) : (0u));
+#if 0
+                            if (sw_util_queue[ sw_util_queue_head ].tsc == 0.0f) {
+                                sw_util_queue[ sw_util_queue_head ] = (sw_util_t) {
+                                    .tsc  = switch_id.time,
+                                    .out  = (perf_header.misc & (PERF_RECORD_MISC_SWITCH_OUT | PERF_RECORD_MISC_SWITCH_OUT_PREEMPT)) ? (1u) : (0u),
+                                    .util = switch_util
+                                };
+                                sw_util_queue_head = (sw_util_queue_head + 1u) % SW_UTIL_QUEUE_LEN;
+                            }
+#endif
                         } break;
 
                         default: {
@@ -811,14 +846,14 @@ static void* perfing_main(void* args) {
             }
 
             if (perfing_is_running == 0u) {
-                fprintf(stdout, "Killing Intel PT ...\n");
+                fprintf(stdout, "Killing Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
 
                 fprintf(stdout, "no_record_aux = %u\n", no_record_aux);
                 fprintf(stdout, "sz_record_aux = %llu MB\n", sz_record_aux / ONE_MB);
 
                 break;
             } else if (perfing_is_running == 2u) {
-                fprintf(stdout, "Disabling Intel PT ...\n");
+                fprintf(stdout, "Disabling Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
                 perfing_is_running = 1u;
                 break;
             }
@@ -893,7 +928,7 @@ static void perfed_setup(void) {
         perf_attrs.exclude_kernel = 1;
 #endif
         //perf_attrs.exclude_hv     = 1;
-        perf_attrs.exclude_idle   = 1;
+        //perf_attrs.exclude_idle   = 1;
         perf_attrs.mmap           = 1;
         perf_attrs.comm           = 1;
         perf_attrs.freq           = 1;
@@ -904,21 +939,26 @@ static void perfed_setup(void) {
         //perf_attrs.exclude_guest   = 1;
         perf_attrs.mmap2          = 1;
         perf_attrs.comm_exec      = 1;
-        //perf_attrs.use_clockid    = 1;
+        perf_attrs.use_clockid    = 1;
         perf_attrs.context_switch = 1;
         perf_attrs.ksymbol        = 1;
         perf_attrs.bpf_event      = 1;
         //perf_attrs.aux_output     = 1;
         perf_attrs.text_poke      = 1;
-        perf_attrs.clockid        = CLOCK_MONOTONIC_RAW;
+        perf_attrs.clockid        = CLOCK_TSC;
         perf_attrs.aux_watermark  = ONE_MB;
 
         perfing_fd = syscall(SYS_perf_event_open,
                              &perf_attrs,
+#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
+                            -1,
+#else
                              perfed_pid,
+#endif
                              perfed_cpu,
                              -1,
                              PERF_FLAG_FD_CLOEXEC);
+        fprintf(stdout, "Confing Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
         if (perfing_fd != -1) {
             void* p = mmap(NULL,
                            MMAP_SIZE,

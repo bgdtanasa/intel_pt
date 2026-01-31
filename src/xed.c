@@ -10,6 +10,7 @@
 #if defined(EN_PTRACE_UNWIND)
 #include "x_unwind.h"
 #endif
+#include "kmod.h"
 #include "utils.h"
 
 #include <string.h>
@@ -84,6 +85,13 @@ typedef struct {
   unsigned long long int t_cycs;
 } inst_stats_t;
 
+#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
+typedef enum {
+  XED_STATUS_DISABLE = 0,
+  XED_STATUS_ENABLE,
+} xed_status_t;
+#endif
+
 #if defined(EN_PTRACE_UNWIND)
 dwarf_unwind_t*    unwinds;
 unsigned long long no_unwinds;
@@ -92,6 +100,10 @@ char               binaries[ MAX_NO_BINARIES ][ MAX_BINARY_LENGTH ];
 unsigned int       no_binaries;
 inst_t*            insts;
 unsigned long long no_insts;
+
+sw_util_t    sw_util_queue[ SW_UTIL_QUEUE_LEN ];
+unsigned int sw_util_queue_head;
+unsigned int sw_util_queue_tail;
 
 static ctx_t        ctx[ MAX_NO_CTXS ] = {
   [ 0u ] = {
@@ -113,6 +125,11 @@ static ctx_t        ctx[ MAX_NO_CTXS ] = {
 static ctx_t*       this_ctx           = &ctx[ 0u ];
 static unsigned int ctx_idx            = 0u;
 
+static unsigned long long int this_pgd   = 0llu;
+#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
+static xed_status_t           xed_status = XED_STATUS_DISABLE;
+#endif
+
 static FILE*                  branches_fp;
 static unsigned long long int branches_n;
 
@@ -120,7 +137,11 @@ static xed_chip_features_t chip_features;
 static inst_stats_t        inst_stats;
 
 #if defined(EN_VMLINUX)
+#if defined(VMLINUX_STEXT)
 static const inst_t* unwind_cache_high[ CACHE_LENGTH ];
+#else
+#error "VMLINUX_STEXT is not defined"
+#endif
 #endif
 static const inst_t* unwind_cache_low[ CACHE_LENGTH ];
 
@@ -129,29 +150,16 @@ extern double tsc_hz_ns;
 extern double tsc_factor;
 extern double cbr_factor;
 
-static void xed_print_stack(void) {
-  for (unsigned int i = ctx_idx; i >= 0u ; i--) {
-    if (ctx[ i ].call_stack_idx >= 1u) {
-      const inst_t* const inst_i = &insts[ ctx[ i ].last_inst ];
+static inline __attribute__((always_inline)) void reset_call_stack(void) {
+  memset(&this_ctx->call_stack[ 0u ], 0, sizeof(this_ctx->call_stack));
+  this_ctx->call_stack_idx = 0u;
+}
 
-      fprintf(branches_fp, "\t%2u/%2c %016llx\n", i, 'x', inst_i->addr);
+static inline __attribute__((always_inline)) void reset_last_inst(void) {
+  this_ctx->last_inst = -1ll;
 
-      for (unsigned int j = ctx[ i ].call_stack_idx - 1u; j >= 0u ; j--) {
-        const inst_t* const inst_c = ctx[ i ].call_stack[ j ].call;
-        const inst_t* const inst_r = ctx[ i ].call_stack[ j ].ret;
-
-        fprintf(branches_fp, "\t%2u/%2u %016llx %016llx\n", i, j, inst_c->addr, inst_r->addr);
-
-        if (j == 0u) {
-          break;
-        }
-      }
-    }
-
-    if (i == 0u) {
-      break;
-    }
-  }
+  this_ctx->tnt_queue_head = this_ctx->tnt_queue_tail = 0u;
+  this_ctx->tip_queue_head = this_ctx->tip_queue_tail = 0u;
 }
 
 static inline __attribute__((always_inline)) void update_inst_stats(const xed_iclass_enum_t iclass) {
@@ -239,7 +247,7 @@ void parse_dwarf(const char* const xed_file, const unsigned long long int base_a
 
   dwarf_file[ 0u ] = '\0';
   if (xed_file != NULL) {
-    sprintf(&dwarf_file[ 0u ], "resources/dwarf.%s", xed_file);
+    sprintf(&dwarf_file[ 0u ], "resources/dwarfs/dwarf.%s", xed_file);
   }
 
   FILE* const fp = fopen(dwarf_file, "r");
@@ -378,7 +386,7 @@ void parse_objdump(const int perfed_pid, const char* const xed_file, const unsig
 
   obj_file[ 0u ] = '\0';
   if (xed_file != NULL) {
-    sprintf(&obj_file[ 0u ], "resources/objdump.%s", xed_file);
+    sprintf(&obj_file[ 0u ], "resources/objdumps/objdump.%s", xed_file);
   }
 
   FILE* const fp = fopen(obj_file, "r");
@@ -638,12 +646,53 @@ void perfed_xed(const int perfed_pid) {
   }
 }
 
+void xed_intel_pt_ovf(const double                 tsc,
+                      const unsigned long long int cyc_cnt) {
+  this_pgd = 0llu;
+
+#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
+  fprintf(branches_fp, "Pid Reset %16llx :: %20.2lf %20llu\n", 0llu, tsc, cyc_cnt);
+
+  xed_status = XED_STATUS_DISABLE;
+#endif
+
+  fprintf(branches_fp, "O :: %20.2lf %20llu\n", tsc, cyc_cnt);
+}
+
+extern void xed_intel_pt_pip(const unsigned long long int pgd,
+                             const double                 tsc,
+                             const unsigned long long int cyc_cnt) {
+  this_pgd = pgd;
+
+  if (pgd == ((unsigned long long int) (perfed_pgd))) {
+#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
+    if (xed_status != XED_STATUS_ENABLE) {
+      fprintf(branches_fp, "Pid Enter %16llx :: %20.2lf %20llu\n", pgd, tsc, cyc_cnt);
+
+      xed_status = XED_STATUS_ENABLE;
+    }
+#else
+    fprintf(branches_fp, "Pid Enter :: %20.2lf %20llu\n", tsc, cyc_cnt);
+#endif
+  } else {
+#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
+    if (xed_status != XED_STATUS_DISABLE) {
+      fprintf(branches_fp, "Pid  Exit %16llx :: %20.2lf %20llu\n", pgd, tsc, cyc_cnt);
+
+      xed_status = XED_STATUS_DISABLE;
+    }
+#else
+    fprintf(branches_fp, "Pid  Exit :: %20.2lf %20llu\n", tsc, cyc_cnt);
+#endif
+  }
+}
+
 void xed_intel_pt_ovf_fup(const unsigned long long int ip,
                           const double                 tsc,
                           const unsigned long long int cyc_cnt) {
-  reset_inst_stats(cyc_cnt);
-
-  fprintf(branches_fp, "O :: %20.2lf %20llu %16llx\n", tsc, cyc_cnt, ip);
+  (void) (ip);
+  (void) (tsc);
+  (void) (cyc_cnt);
 }
 
 void xed_intel_pt_tip_enable(const unsigned long long int tip,
@@ -659,12 +708,13 @@ void xed_intel_pt_bip_fup(const unsigned long long int a,
                           const double                 tsc,
                           const unsigned long long int pmu_mask,
                           const unsigned long long int mem_addr) {
-  fprintf(branches_fp, "F :: %20.2lf :: %16llx -> %16llx MEM = %16llx\n", tsc, a, b, mem_addr);
 #if defined(EN_PMU)
   pmu_info(pmu_mask, branches_fp);
 #else
   (void) (pmu_mask);
 #endif
+
+  fprintf(branches_fp, "F :: %20.2lf :: %16llx -> %16llx MEM = %16llx\n", tsc, a, b, mem_addr);
 }
 
 void xed_intel_pt_ptw_fup(const unsigned long long int ip,
@@ -686,13 +736,11 @@ void xed_intel_pt_tip_disable(const double                 tsc,
   fprintf(branches_fp, "D :: %20.2lf %20llu\n", tsc, cyc_cnt);
 }
 
-void xed_tid_switch(const double       tsc,
-                    const unsigned int sw_out) {
-
-  if (sw_out == 1u) {
-    fprintf(branches_fp, "Y :: %20.2lf\n", tsc);
+void xed_tid_switch(const sw_util_t* const sw_util) {
+  if (sw_util->out == 1u) {
+    fprintf(branches_fp, "Y :: %20.2lf %6.2lf\n", ((double) (sw_util->tsc)), sw_util->util);
   } else {
-    fprintf(branches_fp, "X :: %20.2lf\n", tsc);
+    fprintf(branches_fp, "X :: %20.2lf %6.2lf\n", ((double) (sw_util->tsc)), sw_util->util);
   }
 }
 
@@ -885,19 +933,21 @@ void xed_ptrace_unwind(void* const p) {
 }
 #endif
 
-void xed_reset_call_stack(void) {
-  memset(&this_ctx->call_stack[ 0u ], 0, sizeof(this_ctx->call_stack));
-  this_ctx->call_stack_idx = 0u;
-}
-
-void xed_reset_last_inst(void) {
-  this_ctx->last_inst = -1ll;
-
-  this_ctx->tnt_queue_head = this_ctx->tnt_queue_tail = 0u;
-  this_ctx->tip_queue_head = this_ctx->tip_queue_tail = 0u;
-}
-
 void xed_update_last_inst(const unsigned long long addr) {
+#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
+  if (xed_status == XED_STATUS_DISABLE) {
+#if defined(VMLINUX_STEXT)
+    if (addr < VMLINUX_STEXT) {
+      this_ctx->last_inst = -1ll;
+
+      return;
+    }
+#else
+#error "VMLINUX_STEXT is not defined"
+#endif
+  }
+#endif
+
   const inst_t* const inst = xed_unwind_find_inst(addr);
 
   if (inst != NULL) {
@@ -915,8 +965,7 @@ void xed_update_last_inst(const unsigned long long addr) {
         return;
       }
     }
-    xed_close();
-    fprintf(stderr, "XED Instruction %16llx not found\n", addr); for (;;) {}
+    xed_close(); fprintf(stderr, "XED Instruction %16llx not found\n", addr); for (;;) {}
   }
 }
 
@@ -1148,7 +1197,8 @@ void xed_process_branches(const unsigned int           tnt,
               this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = branches_n;
 
               if (ret != x_tip->tip) {
-                xed_print_stack(); xed_close(); fprintf(stderr, "0 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
+                reset_call_stack();
+                //xed_close(); fprintf(stderr, "0 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
               } else {
                 const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
                 const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
@@ -1158,7 +1208,7 @@ void xed_process_branches(const unsigned int           tnt,
 
                   if (tsc_rc < 0.0f) {
                     //xed_close();
-                    fprintf(stderr, "0 Broken call stack :: Negative call time %20.2lf %20.2lf => %20.2lf\n", tsc_c, tsc_r, tsc_rc); //for (;;) {}
+                    fprintf(stdout, "0 Broken call stack :: Negative call time %20.2lf %20.2lf => %20.2lf\n", tsc_c, tsc_r, tsc_rc); //for (;;) {}
                   }
                 }
               }
@@ -1171,7 +1221,7 @@ void xed_process_branches(const unsigned int           tnt,
           xed_update_last_inst(x_tip->tip);
           this_ctx->tip_queue_tail = (this_ctx->tip_queue_tail + 1u) % TIP_QUEUE_LEN;
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-          fprintf(branches_fp, "%s -> %16llx T :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, x_tip->tsc);
+          fprintf(branches_fp, "%s -> %16llx T :: %20.2lf\n", &branches_buffer[ 0u ], x_tip->tip, x_tip->tsc);
 #endif
           print_inst_stats(x_tip->cyc_cnt);
         } else {
@@ -1202,7 +1252,8 @@ void xed_process_branches(const unsigned int           tnt,
               this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = branches_n;
 
               if (ret != x_tip->tip) {
-                xed_print_stack(); xed_close(); fprintf(stderr, "1 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
+                reset_call_stack();
+                //xed_close(); fprintf(stderr, "1 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
               } else {
                 const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
                 const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
@@ -1212,7 +1263,7 @@ void xed_process_branches(const unsigned int           tnt,
 
                   if (tsc_rc < 0.0f) {
                     //xed_close();
-                    fprintf(stderr, "1 Broken call stack :: Negative call time %20.2lf %20.2lf => %20.2lf\n", tsc_c, tsc_r, tsc_rc); //for (;;) {}
+                    fprintf(stdout, "1 Broken call stack :: Negative call time %20.2lf %20.2lf => %20.2lf\n", tsc_c, tsc_r, tsc_rc); //for (;;) {}
                   }
                 }
               }
@@ -1224,7 +1275,7 @@ void xed_process_branches(const unsigned int           tnt,
           xed_update_last_inst(x_tip->tip);
           this_ctx->tip_queue_tail = (this_ctx->tip_queue_tail + 1u) % TIP_QUEUE_LEN;
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-          fprintf(branches_fp, "%s -> %16llx T :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, x_tip->tsc);
+          fprintf(branches_fp, "%s -> %16llx T :: %20.2lf\n", &branches_buffer[ 0u ], x_tip->tip, x_tip->tsc);
 #endif
           print_inst_stats(x_tip->cyc_cnt);
 
@@ -1236,10 +1287,10 @@ void xed_process_branches(const unsigned int           tnt,
               fflush(branches_fp); for (;;) {}
             }
             if (this_ctx->tnt_queue_head != this_ctx->tnt_queue_tail) {
-              fflush(branches_fp); for (;;) {}
+              fflush(branches_fp); fprintf(stderr, " BR Queue TIP_PGD\n"); for (;;) {}
             }
             if (this_ctx->tip_queue_head != this_ctx->tip_queue_tail) {
-              fflush(branches_fp); for (;;) {}
+              fflush(branches_fp); fprintf(stderr, "TIP Queue TIP_PGD\n"); for (;;) {}
             }
             ctx_idx--;
             this_ctx = &ctx[ ctx_idx ];
@@ -1248,7 +1299,7 @@ void xed_process_branches(const unsigned int           tnt,
           return;
         }
       } else {
-        fprintf(stderr, "Unknown cofi type\n"); for (;;) {}
+        xed_close(); fprintf(stderr, "Unknown cofi type\n"); for (;;) {}
       }
     }
   }
@@ -1261,8 +1312,8 @@ void xed_async_reset(const unsigned long long int tip,
 
   for (unsigned int i = 0u; i <= ctx_idx; i++) {
     this_ctx = &ctx[ i ];
-    xed_reset_call_stack();
-    xed_reset_last_inst();
+    reset_call_stack();
+    reset_last_inst();
   }
   fprintf(branches_fp, "Async Reset :: %20.2lf %16llx\n", tsc, tip);
   ctx_idx  = 0u;
@@ -1275,10 +1326,10 @@ void xed_async_enter(const unsigned long long int tip,
   reset_inst_stats(cyc_cnt);
 
   if (this_ctx->tnt_queue_head != this_ctx->tnt_queue_tail) {
-    fflush(branches_fp); for (;;) {}
+    fflush(branches_fp); fprintf(stderr, " BR Queue TIP_PGD\n"); for (;;) {}
   }
   if (this_ctx->tip_queue_head != this_ctx->tip_queue_tail) {
-    fflush(branches_fp); for (;;) {}
+    fflush(branches_fp); fprintf(stderr, "TIP Queue TIP_PGD\n"); for (;;) {}
   }
   ctx_idx++;
   if (ctx_idx >= MAX_NO_CTXS) {
@@ -1303,9 +1354,13 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
     return NULL;
   }
 #if defined(EN_VMLINUX)
-  if ((addr >= 0xFFFFFFFF81000000llu) && (unwind_cache_high[ addr & CACHE_MASK ] != NULL) && (unwind_cache_high[ addr & CACHE_MASK ]->addr == addr)) {
+#if defined(VMLINUX_STEXT)
+  if ((addr >= VMLINUX_STEXT) && (unwind_cache_high[ addr & CACHE_MASK ] != NULL) && (unwind_cache_high[ addr & CACHE_MASK ]->addr == addr)) {
     return unwind_cache_high[ addr & CACHE_MASK ];
   }
+#else
+#error "VMLINUX_STEXT is not defined"
+#endif
 #endif
   if ((unwind_cache_low[ addr & CACHE_MASK ] != NULL) && (unwind_cache_low[ addr & CACHE_MASK ]->addr == addr)) {
     return unwind_cache_low[ addr & CACHE_MASK ];
@@ -1330,9 +1385,13 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
 
     if ((insts[ m ].addr <= addr) && (addr <= insts[ m ].addr + insts[ m ].length - 1llu)) {
 #if defined(EN_VMLINUX)
-      if (addr >= 0xFFFFFFFF81000000llu) {
+#if defined(VMLINUX_STEXT)
+      if (addr >= VMLINUX_STEXT) {
         unwind_cache_high[ addr & CACHE_MASK ] = &insts[ m ];
       }
+#else
+#error "VMLINUX_STEXT is not defined"
+#endif
 #endif
       unwind_cache_low[ addr & CACHE_MASK ] = &insts[ m ];
 
