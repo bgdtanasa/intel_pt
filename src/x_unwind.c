@@ -4,6 +4,7 @@
 #include "utils.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if 1
@@ -17,13 +18,20 @@
 static const inst_t*          unwind_cache[ CACHE_LENGTH ];
 static unsigned long long int cfa_regs[ MAX_NO_REGS ];
 
-unwind_insts_t unwind_queue[ UNWIND_QUEUE_LEN ];
-unsigned int   unwind_queue_head;
-unsigned int   unwind_queue_tail;
+unwind_insts_t* unwind_queue;
+unsigned int    unwind_queue_head;
+unsigned int    unwind_queue_tail;
 
 extern double tsc_hz_ns;
 
 void perfed_unwind(const int perfed_pid __attribute__((unused))) {
+  unwind_queue = (unwind_insts_t*) malloc(UNWIND_QUEUE_LEN * sizeof(unwind_insts_t));
+  if (unwind_queue == NULL) {
+    fprintf(stderr, "malloc failed\n"); for (;;) {}
+  } else {
+    memset(unwind_queue, 0, UNWIND_QUEUE_LEN * sizeof(unwind_insts_t));
+    fprintf(stdout, "unwind_queue size  = %4llu MB\n", (UNWIND_QUEUE_LEN * sizeof(unwind_insts_t)) / 1024llu / 1024llu);
+  }
 }
 
 unwind_insts_t* unwind(const int                            perfed_pid,
@@ -69,7 +77,7 @@ unwind_again:
   if (inst == NULL) {
     fprintf(stderr, "UNWIND Instruction %16llx not found\n", cfa_regs[ 16u ]); return NULL; for (;;) {}
   }
-  dwarf_unwind = (inst != NULL) ? (inst->dwarf_unwind) : (NULL);
+  dwarf_unwind = inst->dwarf_unwind;
   if (dwarf_unwind != NULL) {
     unwind_insts->insts[ unwind_insts->no_insts++ ] = inst;
 
@@ -149,4 +157,5 @@ unwind_done:
 }
 
 void unwind_close(void) {
+  free(unwind_queue);
 }

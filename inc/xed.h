@@ -31,11 +31,11 @@
 #define INDIRECT_BRANCH      (1u << 2u)
 #define FAR_TRANSFER         (1u << 3u)
 
-#define MAX_NO_UNWINDS    (5000000llu)
-#define MAX_NO_BINARIES   (512u)
-#define MAX_BINARY_LENGTH (256u)
-#define MAX_NO_INSTS      (70000000llu)
-#define MAX_NO_CTXS       (5u)
+#define MAX_NO_DWARF_UNWINDS (1000000llu)
+#define MAX_NO_BINARIES      (512u)
+#define MAX_BINARY_LENGTH    (256u)
+#define MAX_NO_INSTS         (60000000llu)
+#define MAX_NO_CTXS          (5u)
 
 #define SW_UTIL_QUEUE_LEN (1u * 1024u)
 
@@ -107,7 +107,9 @@ typedef struct {
   xed_category_enum_t    category;
   xed_iclass_enum_t      iclass;
   xed_uint_t             length;
+#if defined(PRINT_XED_OPCODE)
   xed_uint8_t            bytes[ XED_MAX_INSTRUCTION_BYTES ];
+#endif
 
   cofi_t                 cofi;
 
@@ -131,8 +133,8 @@ typedef struct {
 } sw_util_t;
 
 #if defined(EN_PTRACE_UNWIND)
-extern dwarf_unwind_t*    unwinds;
-extern unsigned long long no_unwinds;
+extern dwarf_unwind_t*    dwarf_unwinds;
+extern unsigned long long no_dwarf_unwinds;
 #endif
 extern char               binaries[ MAX_NO_BINARIES ][ MAX_BINARY_LENGTH ];
 extern unsigned int       no_binaries;
@@ -201,7 +203,7 @@ extern void xed_tsc_err(const double tsc_err);
 extern const inst_t*         xed_unwind_find_inst(const unsigned long long int addr);
 #if defined(EN_PTRACE_UNWIND)
 extern const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr);
-extern void                  xed_unwind_link_inst_and_dwarf(void);
+extern void                  xed_unwind_link_inst_to_dwarf(void);
 #endif
 
 extern void xed_close(void);

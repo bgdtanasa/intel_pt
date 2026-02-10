@@ -192,7 +192,7 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
 #endif
 
 #if defined(EN_PTRACE_UNWIND)
-        xed_unwind_link_inst_and_dwarf();
+        xed_unwind_link_inst_to_dwarf();
 #endif
         fclose(fp);
     } else {

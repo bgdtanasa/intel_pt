@@ -623,9 +623,10 @@ static void* perfing_main(void* args) {
                                 aux_util_max = aux_util;
                             }
 #if defined(EN_PTRACE_UNWIND)
-                            if ((perfed_status == PERFED_STATUS_RUNNING) && (intel_pt_status == INTEL_PT_STATUS_ENABLE) && (unwind_queue[ unwind_queue_head ].no_insts == 0u)) {
+                            if ((perfed_status == PERFED_STATUS_RUNNING)    &&
+                                (intel_pt_status == INTEL_PT_STATUS_ENABLE) &&
+                                (unwind_queue[ unwind_queue_head ].no_insts == 0u)) {
                                 long ret;
-                                int  status;
 
                                 perfed_ptrace_a = a;
                                 errno = 0;
@@ -874,7 +875,9 @@ do_switch_util:
     }
     close(perfing_fd);
 
+#if defined(EN_PTRACE_UNWIND)
     unwind_close();
+#endif
     kmod_close();
 #if defined(EN_PTRACE_BRK)
     brk_close();
@@ -978,7 +981,9 @@ static void perfed_setup(void) {
                          perfing_fd,
                          perf_metadata->aux_offset);
                 if (p != MAP_FAILED) {
+#if defined(EN_PTRACE_UNWIND)
                     perfed_unwind(perfed_pid);
+#endif
                     perfed_xed(perfed_pid);
                     perfed_proc(perfed_pid, NULL);
 #if defined(EN_PMU)

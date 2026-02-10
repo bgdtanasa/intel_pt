@@ -63,6 +63,9 @@
 #if 0
 #define PRINT_PT
 #endif
+#if 0
+#define AUX_DBG
+#endif
 
 #define INTEL_PT_PKT_HISTORY (64u)
 

@@ -6,7 +6,7 @@
 #include <sys/user.h>
 
 #define MAX_NO_UNWIND_INSTS (256u)
-#define UNWIND_QUEUE_LEN    (2048u)
+#define UNWIND_QUEUE_LEN    (32768u)
 
 typedef struct {
   unsigned long long int tsc;
@@ -17,9 +17,9 @@ typedef struct {
   unsigned long long int detach_tsc;
 } unwind_insts_t;
 
-extern unwind_insts_t unwind_queue[ UNWIND_QUEUE_LEN ];
-extern unsigned int   unwind_queue_head;
-extern unsigned int   unwind_queue_tail;
+extern unwind_insts_t* unwind_queue;
+extern unsigned int    unwind_queue_head;
+extern unsigned int    unwind_queue_tail;
 
 extern void perfed_unwind(const int perfed_pid);
 

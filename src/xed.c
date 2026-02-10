@@ -93,8 +93,8 @@ typedef enum {
 #endif
 
 #if defined(EN_PTRACE_UNWIND)
-dwarf_unwind_t*    unwinds;
-unsigned long long no_unwinds;
+dwarf_unwind_t*    dwarf_unwinds;
+unsigned long long no_dwarf_unwinds;
 #endif
 char               binaries[ MAX_NO_BINARIES ][ MAX_BINARY_LENGTH ];
 unsigned int       no_binaries;
@@ -276,26 +276,26 @@ void parse_dwarf(const char* const xed_file, const unsigned long long int base_a
           if (n != 3) {
             n = sscanf(a, "  0x%llx: CFA=DW_OP_%[^\n]", &addr, b);
             if (n == 2) {
-              unwinds[ no_unwinds ].base_addr = base_addr;
-              unwinds[ no_unwinds ].addr      = base_addr + addr;
-              unwinds[ no_unwinds ].cfa.rule  = CFA_RULE_EXP;
-              strcpy(b, parse_dwarf_exp(b, ':', 2, &unwinds[ no_unwinds ].cfa.s.exp));
+              dwarf_unwinds[ no_dwarf_unwinds ].base_addr = base_addr;
+              dwarf_unwinds[ no_dwarf_unwinds ].addr      = base_addr + addr;
+              dwarf_unwinds[ no_dwarf_unwinds ].cfa.rule  = CFA_RULE_EXP;
+              strcpy(b, parse_dwarf_exp(b, ':', 2, &dwarf_unwinds[ no_dwarf_unwinds ].cfa.s.exp));
             } else {
               fprintf(stderr, "0 dwarf_cfa_err\n"); for (;;) {}
             }
           } else {
-            unwinds[ no_unwinds ].base_addr        = base_addr;
-            unwinds[ no_unwinds ].addr             = base_addr + addr;
-            unwinds[ no_unwinds ].cfa.rule         = CFA_RULE_REG;
-            unwinds[ no_unwinds ].cfa.s.reg        = cfa_reg;
-            unwinds[ no_unwinds ].cfa.s.reg_offset = 0;
+            dwarf_unwinds[ no_dwarf_unwinds ].base_addr        = base_addr;
+            dwarf_unwinds[ no_dwarf_unwinds ].addr             = base_addr + addr;
+            dwarf_unwinds[ no_dwarf_unwinds ].cfa.rule         = CFA_RULE_REG;
+            dwarf_unwinds[ no_dwarf_unwinds ].cfa.s.reg        = cfa_reg;
+            dwarf_unwinds[ no_dwarf_unwinds ].cfa.s.reg_offset = 0;
           }
         } else {
-          unwinds[ no_unwinds ].base_addr        = base_addr;
-          unwinds[ no_unwinds ].addr             = base_addr + addr;
-          unwinds[ no_unwinds ].cfa.rule         = CFA_RULE_REG;
-          unwinds[ no_unwinds ].cfa.s.reg        = cfa_reg;
-          unwinds[ no_unwinds ].cfa.s.reg_offset = cfa_reg_offset;
+          dwarf_unwinds[ no_dwarf_unwinds ].base_addr        = base_addr;
+          dwarf_unwinds[ no_dwarf_unwinds ].addr             = base_addr + addr;
+          dwarf_unwinds[ no_dwarf_unwinds ].cfa.rule         = CFA_RULE_REG;
+          dwarf_unwinds[ no_dwarf_unwinds ].cfa.s.reg        = cfa_reg;
+          dwarf_unwinds[ no_dwarf_unwinds ].cfa.s.reg_offset = cfa_reg_offset;
         }
         c = a; a = b; b = c; b[ 0u ] = '\0';
 
@@ -350,17 +350,17 @@ reg_again:
           goto reg_again;
         }
 
-        if (no_unwinds >= MAX_NO_UNWINDS) {
+        if (no_dwarf_unwinds >= MAX_NO_DWARF_UNWINDS) {
           fprintf(stderr, "Not enough space to load the unwinds\n"); for (;;) {}
         }
-        memcpy(&unwinds[ no_unwinds ].regs[ 0u ], &regs[ 0u ], sizeof(regs));
-        no_unwinds++;
+        memcpy(&dwarf_unwinds[ no_dwarf_unwinds ].regs[ 0u ], &regs[ 0u ], sizeof(regs));
+        no_dwarf_unwinds++;
       } else {
         break;
       }
     }
 
-    fprintf(stdout, "no_unwinds  = %9llu :: ", no_unwinds);
+    fprintf(stdout, "no_dwarf_unwinds = %9llu :: ", no_dwarf_unwinds);
     fprintf(stdout, "no_binaries = %9u :: ", no_binaries);
     fclose(fp);
   } else {
@@ -372,10 +372,12 @@ reg_again:
 }
 #endif
 
-void parse_objdump(const int perfed_pid, const char* const xed_file, const unsigned long long int base_addr) {
-  (void) (perfed_pid);
-
+void parse_objdump(const int perfed_pid __attribute__((unused)), const char* const xed_file, const unsigned long long int base_addr) {
   char obj_file[ 256u ];
+
+  if (xed_file == NULL) {
+    return;
+  }
 
   if (strstr(xed_file, "stack") != NULL) {
     return;
@@ -385,9 +387,7 @@ void parse_objdump(const int perfed_pid, const char* const xed_file, const unsig
   }
 
   obj_file[ 0u ] = '\0';
-  if (xed_file != NULL) {
-    sprintf(&obj_file[ 0u ], "resources/objdumps/objdump.%s", xed_file);
-  }
+  sprintf(&obj_file[ 0u ], "resources/objdumps/objdump.%s", xed_file);
 
   FILE* const fp = fopen(obj_file, "r");
   if (fp != NULL) {
@@ -468,7 +468,9 @@ xed_decode_inst:
             insts[ no_insts ].addr      = addr;
             insts[ no_insts ].category  = xedd_category;
             insts[ no_insts ].iclass    = xedd_iclass;
+#if defined(PRINT_XED_OPCODE)
             memcpy(&insts[ no_insts ].bytes[ 0u ], &inst_bytes[ 0u ], n_bytes);
+#endif
             insts[ no_insts ].length    = xedd_length;
 
             if (xed_inst_get_attribute(xedd_dec, XED_ATTRIBUTE_FAR_XFER) == 1u) {
@@ -619,22 +621,22 @@ xed_decode_inst:
   }
 }
 
-void perfed_xed(const int perfed_pid) {
-  (void) (perfed_pid);
-
+void perfed_xed(const int perfed_pid __attribute__((unused))) {
 #if defined(EN_PTRACE_UNWIND)
-  unwinds = malloc(MAX_NO_UNWINDS * sizeof(dwarf_unwind_t));
-  if (unwinds == NULL) {
+  dwarf_unwinds = (dwarf_unwind_t*) malloc(MAX_NO_DWARF_UNWINDS * sizeof(dwarf_unwind_t));
+  if (dwarf_unwinds == NULL) {
     fprintf(stderr, "malloc failed\n"); for (;;) {}
   } else {
-    fprintf(stdout, "unwinds size = %4llu MB\n", (MAX_NO_UNWINDS * sizeof(inst_t)) / 1024llu / 1024llu);
+    memset(dwarf_unwinds, 0, MAX_NO_DWARF_UNWINDS * sizeof(dwarf_unwind_t));
+    fprintf(stdout, "dwarf_unwinds size = %4llu MB\n", (MAX_NO_DWARF_UNWINDS * sizeof(dwarf_unwind_t)) / 1024llu / 1024llu);
   }
 #endif
-  insts = malloc(MAX_NO_INSTS * sizeof(inst_t));
+  insts = (inst_t*) malloc(MAX_NO_INSTS * sizeof(inst_t));
   if (insts == NULL) {
     fprintf(stderr, "malloc failed\n"); for (;;) {}
   } else {
-    fprintf(stdout, "insts size   = %4llu MB\n", (MAX_NO_INSTS * sizeof(inst_t)) / 1024llu / 1024llu);
+    memset(insts, 0, MAX_NO_INSTS * sizeof(inst_t));
+    fprintf(stdout, "insts size         = %4llu MB\n", (MAX_NO_INSTS * sizeof(inst_t)) / 1024llu / 1024llu);
   }
 
   xed_tables_init();
@@ -1409,7 +1411,7 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
 #if defined(EN_PTRACE_UNWIND)
 const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr) {
   signed long long int   a = 0ll;
-  signed long long int   b = ((signed long long int) (no_unwinds - 1llu));
+  signed long long int   b = ((signed long long int) (no_dwarf_unwinds - 1llu));
   signed long long int   m;
   unsigned long long int x;
   unsigned long long int y;
@@ -1417,10 +1419,10 @@ const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr) {
   while (a <= b) {
     m = (a + b) / 2ll;
 
-    x = unwinds[ m + 0 ].addr;
-    y = unwinds[ m + 1 ].addr;
+    x = dwarf_unwinds[ m + 0 ].addr;
+    y = dwarf_unwinds[ m + 1 ].addr;
     if ((x <= addr) && (addr < y)) {
-      return &unwinds[ m ];
+      return &dwarf_unwinds[ m ];
     } else if (x < addr) {
       a = m + 1ll;
     } else {
@@ -1431,7 +1433,7 @@ const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr) {
   return NULL;
 }
 
-void xed_unwind_link_inst_and_dwarf(void) {
+void xed_unwind_link_inst_to_dwarf(void) {
   for (unsigned long long int i = 0llu; i < no_insts - 1llu; i++) {
     if (insts[ i ].addr > insts[ i + 1llu ].addr) {
       fprintf(stderr,
@@ -1460,17 +1462,17 @@ void xed_unwind_link_inst_and_dwarf(void) {
 
 void xed_close(void) {
 #if defined(EN_PTRACE_UNWIND)
-  for (unsigned int i = 0u; i < no_unwinds; i++) {
-    if (unwinds[ i ].cfa.rule == CFA_RULE_EXP) {
-      free(unwinds[ i ].cfa.s.exp);
+  for (unsigned int i = 0u; i < no_dwarf_unwinds; i++) {
+    if (dwarf_unwinds[ i ].cfa.rule == CFA_RULE_EXP) {
+      free(dwarf_unwinds[ i ].cfa.s.exp);
     }
     for (unsigned j = 0u; j < MAX_NO_REGS; j++) {
-      if (unwinds[ i ].regs[ j ].rule == REG_RULE_EXP) {
-        free(unwinds[ i ].regs[ j ].exp);
+      if (dwarf_unwinds[ i ].regs[ j ].rule == REG_RULE_EXP) {
+        free(dwarf_unwinds[ i ].regs[ j ].exp);
       }
     }
   }
-  free(unwinds);
+  free(dwarf_unwinds);
 #endif
   free(insts);
 
