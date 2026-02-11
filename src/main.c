@@ -104,9 +104,9 @@
 #define AUX_MEMCPY_AVX  (1u)
 #define AUX_MEMCPY      (AUX_MEMCPY_AVX)
 #if (AUX_MEMCPY == AUX_MEMCPY_SSE)
-    #define AUX_ALIGNMENT ((unsigned long long int) (sizeof(__m128i)))
+#define AUX_ALIGNMENT   ((unsigned long long int) (sizeof(__m128i)))
 #elif (AUX_MEMCPY == AUX_MEMCPY_AVX)
-    #define AUX_ALIGNMENT ((unsigned long long int) (sizeof(__m256i)))
+#define AUX_ALIGNMENT   ((unsigned long long int) (sizeof(__m256i)))
 #else
 #endif
 
@@ -139,88 +139,88 @@
 #define MSR_RELOAD_PMC3 (0x14C4llu)
 
 typedef struct {
-    __u32 pid;
-    __u32 tid;
-    __u64 time;
-    __u32 cpu;
-    __u32 res;
+  __u32 pid;
+  __u32 tid;
+  __u64 time;
+  __u32 cpu;
+  __u32 res;
 } sample_id_t;
 
 typedef struct {
-    __u64       id;
-    __u64       lost;
-    sample_id_t sample_id;
+  __u64       id;
+  __u64       lost;
+  sample_id_t sample_id;
 } perf_record_lost_t;
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 typedef struct {
-    __u32 pid;
-    __u32 tid;
-    __u64 addr;
-    __u64 len;
-    __u64 pgoff;
-    union {
-        struct {
-            __u32 maj;
-            __u32 min;
-            __u64 ino;
-            __u64 ino_generation;
-        } s_1;
-        struct {
-            __u8 build_id_size;
-            __u8 __reserved_1;
-            __u8 __reserved_2;
-            __u8 build[ 20u ];
-        } s_2;
-    } u;
-    __u32       prot;
-    __u32       flags;
-    char        filename[ 0u ];
-    sample_id_t id;
+  __u32 pid;
+  __u32 tid;
+  __u64 addr;
+  __u64 len;
+  __u64 pgoff;
+  union {
+    struct {
+      __u32 maj;
+      __u32 min;
+      __u64 ino;
+      __u64 ino_generation;
+    } s_1;
+    struct {
+      __u8 build_id_size;
+      __u8 __reserved_1;
+      __u8 __reserved_2;
+      __u8 build[ 20u ];
+    } s_2;
+  } u;
+  __u32       prot;
+  __u32       flags;
+  char        filename[ 0u ];
+  sample_id_t id;
 } perf_record_mmap2_t;
 #pragma GCC diagnostic pop
 
 typedef struct {
-    __u64       aux_offset;
-    __u64       aux_size;
-    __u64       flags;
-    sample_id_t id;
+  __u64       aux_offset;
+  __u64       aux_size;
+  __u64       flags;
+  sample_id_t id;
 } perf_record_aux_t;
 
 typedef struct {
-    __u32 pid;
-    __u32 tid;
+  __u32 pid;
+  __u32 tid;
 } perf_record_itrace_start_t;
 
 typedef struct {
-    __u64       lost;
-    sample_id_t id;
+  __u64       lost;
+  sample_id_t id;
 } perf_record_lost_samples_t;
 
 typedef struct {
-    sample_id_t id;
+  sample_id_t id;
 } perf_record_switch_t;
 
 typedef struct {
-    __u32       next_prev_pid;
-    __u32       next_prev_tid;
-    sample_id_t id;
+  __u32       next_prev_pid;
+  __u32       next_prev_tid;
+  sample_id_t id;
 } perf_record_switch_wide_t;
 
 typedef union {
-    perf_record_lost_t         record_lost;
-    perf_record_mmap2_t        record_mmap2;
-    perf_record_aux_t          record_aux;
-    perf_record_itrace_start_t record_itrace_start;
-    perf_record_lost_samples_t record_lost_samples;
-    perf_record_switch_t       record_switch;
-    perf_record_switch_wide_t  record_switch_wide;
+  perf_record_lost_t         record_lost;
+  perf_record_mmap2_t        record_mmap2;
+  perf_record_aux_t          record_aux;
+  perf_record_itrace_start_t record_itrace_start;
+  perf_record_lost_samples_t record_lost_samples;
+  perf_record_switch_t       record_switch;
+  perf_record_switch_wide_t  record_switch_wide;
 } perf_record_t;
 
 typedef enum {
-    PERFED_STATUS_RUNNING = 0,
-    PERFED_STATUS_PTRACED
+  PERFED_STATUS_RUNNING = 0,
+  PERFED_STATUS_PTRACED
 } perfed_status_t;
 
 perfed_status_t perfed_status = PERFED_STATUS_RUNNING;
@@ -260,947 +260,777 @@ static struct user_regs_struct ptrace_uregs;
 #endif
 
 static void perfed_msr(void) {
-    char fd_name[ 128u ];
+  char fd_name[ 128u ];
 
-    sprintf(&fd_name[ 0u ], "/dev/cpu/%d/msr", perfed_cpu);
-    perfed_msr_fd = open(&fd_name[ 0u ], O_RDWR);
-    if (perfed_msr_fd != -1) {
-        unsigned long long int msr_val;
+  sprintf(&fd_name[ 0u ], "/dev/cpu/%d/msr", perfed_cpu);
+  perfed_msr_fd = open(&fd_name[ 0u ], O_RDWR);
+  if (perfed_msr_fd != -1) {
+    unsigned long long int msr_val;
 
-        fprintf(stdout, "====== MSR ======\n");
-        //fprintf(stdout, "perfed_msr = %2d %s\n", perfed_msr_fd, &fd_name[ 0u ]);
+    fprintf(stdout, "====== MSR ======\n");
+    if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_TSC_ADJUST) == sizeof(msr_val)) {
+      fprintf(stdout, "IA32_TSC_ADJUST = %016llx\n", msr_val);
 
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_TSC_ADJUST) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_TSC_ADJUST = %016llx\n", msr_val);
-
-            tsc_adj = msr_val;
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_RTIT_CTL) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_RTIT_CTL   = %016llx\n", msr_val);
-            fprintf(stdout, "\tTraceEn   = %16llx\n", (msr_val >>  0llu) & 0x01llu);
-            fprintf(stdout, "\tCYCEn     = %16llx\n", (msr_val >>  1llu) & 0x01llu);
-            fprintf(stdout, "\tOS        = %16llx\n", (msr_val >>  2llu) & 0x01llu);
-            fprintf(stdout, "\tUser      = %16llx\n", (msr_val >>  3llu) & 0x01llu);
-            fprintf(stdout, "\tCR3Filter = %16llx\n", (msr_val >>  7llu) & 0x01llu);
-            fprintf(stdout, "\tToPA      = %16llx\n", (msr_val >>  8llu) & 0x01llu);
-            fprintf(stdout, "\tMTCEn     = %16llx\n", (msr_val >>  9llu) & 0x01llu);
-            fprintf(stdout, "\tTSCEn     = %16llx\n", (msr_val >> 10llu) & 0x01llu);
-            fprintf(stdout, "\tDisRETC   = %16llx\n", (msr_val >> 11llu) & 0x01llu);
-            fprintf(stdout, "\tBranchEn  = %16llx\n", (msr_val >> 13llu) & 0x01llu);
-            fprintf(stdout, "\tMTCFreq   = %16llx\n", (msr_val >> 14llu) & 0x0Fllu);
-            fprintf(stdout, "\tCycThresh = %16llx\n", (msr_val >> 19llu) & 0x0Fllu);
-            fprintf(stdout, "\tPSBFreq   = %16llx\n", (msr_val >> 24llu) & 0x0Fllu);
-            fprintf(stdout, "\tEventEn   = %16llx\n", (msr_val >> 31llu) & 0x0Fllu);
-            fprintf(stdout, "\tInjectPsb = %16llx\n", (msr_val >> 56llu) & 0x01llu);
-        }
-#if 0
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PERFEVTSEL0) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_PERFEVTSEL0 = %016llx\n", msr_val);
-            fprintf(stdout, "\tEVENT_SELECT = %16llx\n", (msr_val >>  0llu) & 0xFFllu);
-            fprintf(stdout, "\tUMASK        = %16llx\n", (msr_val >>  8llu) & 0xFFllu);
-            fprintf(stdout, "\tUSR          = %16llx\n", (msr_val >> 16llu) & 0x01llu);
-            fprintf(stdout, "\tOS           = %16llx\n", (msr_val >> 17llu) & 0x01llu);
-            fprintf(stdout, "\tEDGE         = %16llx\n", (msr_val >> 18llu) & 0x01llu);
-            fprintf(stdout, "\tINT          = %16llx\n", (msr_val >> 20llu) & 0x01llu);
-            fprintf(stdout, "\tANYTHREAD    = %16llx\n", (msr_val >> 21llu) & 0x01llu);
-            fprintf(stdout, "\tENABLE       = %16llx\n", (msr_val >> 22llu) & 0x01llu);
-            fprintf(stdout, "\tINVERT       = %16llx\n", (msr_val >> 23llu) & 0x01llu);
-            fprintf(stdout, "\tCMASK        = %16llx\n", (msr_val >> 24llu) & 0xFFllu);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PERFEVTSEL1) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_PERFEVTSEL1 = %016llx\n", msr_val);
-            fprintf(stdout, "\tEVENT_SELECT = %16llx\n", (msr_val >>  0llu) & 0xFFllu);
-            fprintf(stdout, "\tUMASK        = %16llx\n", (msr_val >>  8llu) & 0xFFllu);
-            fprintf(stdout, "\tUSR          = %16llx\n", (msr_val >> 16llu) & 0x01llu);
-            fprintf(stdout, "\tOS           = %16llx\n", (msr_val >> 17llu) & 0x01llu);
-            fprintf(stdout, "\tEDGE         = %16llx\n", (msr_val >> 18llu) & 0x01llu);
-            fprintf(stdout, "\tINT          = %16llx\n", (msr_val >> 20llu) & 0x01llu);
-            fprintf(stdout, "\tANYTHREAD    = %16llx\n", (msr_val >> 21llu) & 0x01llu);
-            fprintf(stdout, "\tENABLE       = %16llx\n", (msr_val >> 22llu) & 0x01llu);
-            fprintf(stdout, "\tINVERT       = %16llx\n", (msr_val >> 23llu) & 0x01llu);
-            fprintf(stdout, "\tCMASK        = %16llx\n", (msr_val >> 24llu) & 0xFFllu);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PERFEVTSEL2) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_PERFEVTSEL2 = %016llx\n", msr_val);
-            fprintf(stdout, "\tEVENT_SELECT = %16llx\n", (msr_val >>  0llu) & 0xFFllu);
-            fprintf(stdout, "\tUMASK        = %16llx\n", (msr_val >>  8llu) & 0xFFllu);
-            fprintf(stdout, "\tUSR          = %16llx\n", (msr_val >> 16llu) & 0x01llu);
-            fprintf(stdout, "\tOS           = %16llx\n", (msr_val >> 17llu) & 0x01llu);
-            fprintf(stdout, "\tEDGE         = %16llx\n", (msr_val >> 18llu) & 0x01llu);
-            fprintf(stdout, "\tINT          = %16llx\n", (msr_val >> 20llu) & 0x01llu);
-            fprintf(stdout, "\tANYTHREAD    = %16llx\n", (msr_val >> 21llu) & 0x01llu);
-            fprintf(stdout, "\tENABLE       = %16llx\n", (msr_val >> 22llu) & 0x01llu);
-            fprintf(stdout, "\tINVERT       = %16llx\n", (msr_val >> 23llu) & 0x01llu);
-            fprintf(stdout, "\tCMASK        = %16llx\n", (msr_val >> 24llu) & 0xFFllu);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PERFEVTSEL3) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_PERFEVTSEL3 = %016llx\n", msr_val);
-            fprintf(stdout, "\tEVENT_SELECT = %16llx\n", (msr_val >>  0llu) & 0xFFllu);
-            fprintf(stdout, "\tUMASK        = %16llx\n", (msr_val >>  8llu) & 0xFFllu);
-            fprintf(stdout, "\tUSR          = %16llx\n", (msr_val >> 16llu) & 0x01llu);
-            fprintf(stdout, "\tOS           = %16llx\n", (msr_val >> 17llu) & 0x01llu);
-            fprintf(stdout, "\tEDGE         = %16llx\n", (msr_val >> 18llu) & 0x01llu);
-            fprintf(stdout, "\tINT          = %16llx\n", (msr_val >> 20llu) & 0x01llu);
-            fprintf(stdout, "\tANYTHREAD    = %16llx\n", (msr_val >> 21llu) & 0x01llu);
-            fprintf(stdout, "\tENABLE       = %16llx\n", (msr_val >> 22llu) & 0x01llu);
-            fprintf(stdout, "\tINVERT       = %16llx\n", (msr_val >> 23llu) & 0x01llu);
-            fprintf(stdout, "\tCMASK        = %16llx\n", (msr_val >> 24llu) & 0xFFllu);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PERF_CAPABILITIES) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_PERF_CAPABILITIES = %016llx\n", msr_val);
-            fprintf(stdout, "\tLBR_FORMAT          = %16llx\n", (msr_val >>  0llu) & 0x2Fllu);
-            fprintf(stdout, "\tPEBS_TRAP           = %16llx\n", (msr_val >>  6llu) & 0x01llu);
-            fprintf(stdout, "\tPEBS_SAVE_ARCH_REGS = %16llx\n", (msr_val >>  7llu) & 0x01llu);
-            fprintf(stdout, "\tPEBS_RECORD_FORMAT  = %16llx\n", (msr_val >>  8llu) & 0x0Fllu);
-            fprintf(stdout, "\tPEBS_BASELINE       = %16llx\n", (msr_val >> 14llu) & 0x01llu);
-            fprintf(stdout, "\tPEBS_OUTPUT_PT      = %16llx\n", (msr_val >> 16llu) & 0x01llu);
-            fprintf(stdout, "\tPEBS_TIMING_INFO    = %16llx\n", (msr_val >> 17llu) & 0x01llu);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_FIXED_CTR_CTRL) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_FIXED_CTR_CTRL     = %016llx\n", msr_val);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PERF_GLOBAL_STATUS) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_PERF_GLOBAL_STATUS = %016llx\n", msr_val);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PERF_GLOBAL_CTRL) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_PERF_GLOBAL_CTRL   = %016llx\n", msr_val);
-        }
-        //IA32_PERF_GLOBAL_STATUS_RESET
-        //IA32_PERF_GLOBAL_STATUS_SET
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PERF_GLOBAL_INUSE) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_PERF_GLOBAL_INUSE  = %016llx\n", msr_val);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PEBS_ENABLE) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_PEBS_ENABLE = %016llx\n", msr_val);
-            fprintf(stdout, "\tPEBS_EN_PMC0          = %16llx\n", (msr_val >>  0llu) & 0x01llu);
-            fprintf(stdout, "\tPEBS_EN_PMC1          = %16llx\n", (msr_val >>  1llu) & 0x01llu);
-            fprintf(stdout, "\tPEBS_EN_PMC2          = %16llx\n", (msr_val >>  2llu) & 0x01llu);
-            fprintf(stdout, "\tPEBS_EN_PMC3          = %16llx\n", (msr_val >>  3llu) & 0x01llu);
-            fprintf(stdout, "\tPEBS_EN_FIXED0        = %16llx\n", (msr_val >> 32llu) & 0x01llu);
-            fprintf(stdout, "\tPEBS_EN_FIXED1        = %16llx\n", (msr_val >> 33llu) & 0x01llu);
-            fprintf(stdout, "\tPEBS_EN_FIXED2        = %16llx\n", (msr_val >> 34llu) & 0x01llu);
-            fprintf(stdout, "\tPMI_AFTER_EACH_RECORD = %16llx\n", (msr_val >> 60llu) & 0x01llu);
-            fprintf(stdout, "\tPEBS_OUTPUT           = %16llx\n", (msr_val >> 61llu) & 0x03llu);
-
-#if 0
-            msr_val = (0x01llu << 61llu) | // PEBS_OUTPUT
-                      (0x01llu << 60llu) | // PMI_AFTER_EACH_RECORD
-                      (0x00llu << 34llu) |
-                      (0x00llu << 33llu) |
-                      (0x01llu << 32llu) | // PEBS_EN_FIXED0
-                      (0x00llu <<  3llu) |
-                      (0x00llu <<  2llu) |
-                      (0x00llu <<  1llu) |
-                      (0x01llu <<  0llu);  // PEBS_EN_PMC0
-            if (pwrite(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PEBS_ENABLE) == sizeof(msr_val)) {
-                if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_PEBS_ENABLE) == sizeof(msr_val)) {
-                    fprintf(stdout, "IA32_PEBS_ENABLE = %016llx\n", msr_val);
-                    fprintf(stdout, "\tPEBS_EN_PMC0          = %16llx\n", (msr_val >>  0llu) & 0x01llu);
-                    fprintf(stdout, "\tPEBS_EN_PMC1          = %16llx\n", (msr_val >>  1llu) & 0x01llu);
-                    fprintf(stdout, "\tPEBS_EN_PMC2          = %16llx\n", (msr_val >>  2llu) & 0x01llu);
-                    fprintf(stdout, "\tPEBS_EN_PMC3          = %16llx\n", (msr_val >>  3llu) & 0x01llu);
-                    fprintf(stdout, "\tPEBS_EN_FIXED0        = %16llx\n", (msr_val >> 32llu) & 0x01llu);
-                    fprintf(stdout, "\tPEBS_EN_FIXED1        = %16llx\n", (msr_val >> 33llu) & 0x01llu);
-                    fprintf(stdout, "\tPEBS_EN_FIXED2        = %16llx\n", (msr_val >> 34llu) & 0x01llu);
-                    fprintf(stdout, "\tPMI_AFTER_EACH_RECORD = %16llx\n", (msr_val >> 60llu) & 0x01llu);
-                    fprintf(stdout, "\tPEBS_OUTPUT           = %16llx\n", (msr_val >> 61llu) & 0x03llu);
-                }
-            }
-#endif
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_RTIT_STATUS) == sizeof(msr_val)) {
-            fprintf(stdout, "IA32_RTIT_STATUS = %016llx\n", msr_val);
-            fprintf(stdout, "\tFilterEn      = %16llx\n", (msr_val >>  0llu) & 0x00001llu);
-            fprintf(stdout, "\tContexEn      = %16llx\n", (msr_val >>  1llu) & 0x00001llu);
-            fprintf(stdout, "\tTriggerEn     = %16llx\n", (msr_val >>  2llu) & 0x00001llu);
-            fprintf(stdout, "\tError         = %16llx\n", (msr_val >>  4llu) & 0x00001llu);
-            fprintf(stdout, "\tStopped       = %16llx\n", (msr_val >>  5llu) & 0x00001llu);
-            fprintf(stdout, "\tPendPSB       = %16llx\n", (msr_val >>  6llu) & 0x00001llu);
-            fprintf(stdout, "\tPacketByteCnt = %16llu\n", (msr_val >> 32llu) & 0x1FFFFllu);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_FIXED_CTR0) == sizeof(msr_val)) {
-            fprintf(stdout, "MSR_RELOAD_FIXED_CTR0 = %016llx :: %12llu\n", msr_val, 0x0000FFFFFFFFFFFFllu - msr_val);
-#if 0
-            msr_val = 0x0000FFFFFFFFFFFFllu - 127llu;
-            if (pwrite(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_FIXED_CTR0) == sizeof(msr_val)) {
-                if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_FIXED_CTR0) == sizeof(msr_val)) {
-                    fprintf(stdout, "MSR_RELOAD_FIXED_CTR0 = %016llx\n", msr_val);
-                }
-            }
-#endif
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_FIXED_CTR1) == sizeof(msr_val)) {
-            fprintf(stdout, "MSR_RELOAD_FIXED_CTR1 = %016llx :: %12llu\n", msr_val, 0x0000FFFFFFFFFFFFllu - msr_val);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_FIXED_CTR2) == sizeof(msr_val)) {
-            fprintf(stdout, "MSR_RELOAD_FIXED_CTR2 = %016llx :: %12llu\n", msr_val, 0x0000FFFFFFFFFFFFllu - msr_val);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_PMC0) == sizeof(msr_val)) {
-            fprintf(stdout, "MSR_RELOAD_PMC0 = %016llx :: %12llu\n", msr_val, 0x0000FFFFFFFFFFFFllu - msr_val);
-#if 0
-            msr_val = 0x0000FFFFFFFFFFFFllu - 127llu;
-            if (pwrite(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_PMC0) == sizeof(msr_val)) {
-                if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_PMC0) == sizeof(msr_val)) {
-                    fprintf(stdout, "MSR_RELOAD_PMC0 = %016llx\n", msr_val);
-                }
-            }
-#endif
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_PMC1) == sizeof(msr_val)) {
-            fprintf(stdout, "MSR_RELOAD_PMC1 = %016llx :: %12llu\n", msr_val, 0x0000FFFFFFFFFFFFllu - msr_val);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_PMC2) == sizeof(msr_val)) {
-            fprintf(stdout, "MSR_RELOAD_PMC2 = %016llx :: %12llu\n", msr_val, 0x0000FFFFFFFFFFFFllu - msr_val);
-        }
-        if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), MSR_RELOAD_PMC3) == sizeof(msr_val)) {
-            fprintf(stdout, "MSR_RELOAD_PMC3 = %016llx :: %12llu\n", msr_val, 0x0000FFFFFFFFFFFFllu - msr_val);
-        }
-#endif
-        fprintf(stdout, "====== MSR ======\n");
-    } else {
-        fprintf(stderr, "open failed %s\n", strerror(errno));
+      tsc_adj = msr_val;
     }
+    if (pread(perfed_msr_fd, &msr_val, sizeof(msr_val), IA32_RTIT_CTL) == sizeof(msr_val)) {
+      fprintf(stdout, "IA32_RTIT_CTL   = %016llx\n", msr_val);
+      fprintf(stdout, "\tTraceEn   = %16llx\n", (msr_val >>  0llu) & 0x01llu);
+      fprintf(stdout, "\tCYCEn     = %16llx\n", (msr_val >>  1llu) & 0x01llu);
+      fprintf(stdout, "\tOS        = %16llx\n", (msr_val >>  2llu) & 0x01llu);
+      fprintf(stdout, "\tUser      = %16llx\n", (msr_val >>  3llu) & 0x01llu);
+      fprintf(stdout, "\tCR3Filter = %16llx\n", (msr_val >>  7llu) & 0x01llu);
+      fprintf(stdout, "\tToPA      = %16llx\n", (msr_val >>  8llu) & 0x01llu);
+      fprintf(stdout, "\tMTCEn     = %16llx\n", (msr_val >>  9llu) & 0x01llu);
+      fprintf(stdout, "\tTSCEn     = %16llx\n", (msr_val >> 10llu) & 0x01llu);
+      fprintf(stdout, "\tDisRETC   = %16llx\n", (msr_val >> 11llu) & 0x01llu);
+      fprintf(stdout, "\tBranchEn  = %16llx\n", (msr_val >> 13llu) & 0x01llu);
+      fprintf(stdout, "\tMTCFreq   = %16llx\n", (msr_val >> 14llu) & 0x0Fllu);
+      fprintf(stdout, "\tCycThresh = %16llx\n", (msr_val >> 19llu) & 0x0Fllu);
+      fprintf(stdout, "\tPSBFreq   = %16llx\n", (msr_val >> 24llu) & 0x0Fllu);
+      fprintf(stdout, "\tEventEn   = %16llx\n", (msr_val >> 31llu) & 0x0Fllu);
+      fprintf(stdout, "\tInjectPsb = %16llx\n", (msr_val >> 56llu) & 0x01llu);
+    }
+    fprintf(stdout, "====== MSR ======\n");
+  } else {
+    fprintf(stderr, "open failed %s\n", strerror(errno));
+  }
 }
 
-static void* perfing_main(void* args) {
-    (void) (args);
+static void* perfing_main(void* args __attribute__((unused))) {
+  int       ret;
+  cpu_set_t cpu_set;
 
-    int       ret;
-    cpu_set_t cpu_set;
+  CPU_ZERO(&cpu_set);
+  CPU_SET(perfing_cpu, &cpu_set);
 
-    CPU_ZERO(&cpu_set);
-    CPU_SET(perfing_cpu, &cpu_set);
+  ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set), &cpu_set);
+  if (ret == 0) {
+    unsigned int no_record_lost   = 0u;
+    unsigned int no_record_aux    = 0u;
+    unsigned int no_record_switch = 0u;
 
-    ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set), &cpu_set);
-    if (ret == 0) {
-        unsigned int no_record_lost   = 0u;
-        unsigned int no_record_aux    = 0u;
-        unsigned int no_record_switch = 0u;
+    unsigned long long int sz_record_aux = 0llu;
 
-        unsigned long long int sz_record_aux = 0llu;
+    double aux_util     = 0.0f;
+    double aux_util_max = 0.0f;
 
-        double aux_util     = 0.0f;
-        double aux_util_max = 0.0f;
+    double      switch_util = 0.0f;
+    sample_id_t switch_id   = { 0 };
 
-        double      switch_util = 0.0f;
-        sample_id_t switch_id   = { 0 };
+    const __u64 data_size      = perf_metadata->data_size;
+    __u64       data_tail      = __atomic_load_n(&perf_metadata->data_tail, __ATOMIC_ACQUIRE);
+    __u64       data_head;
+    const __u64 aux_size       = perf_metadata->aux_size;
+    const __u64 perf_header_sz = ((__u64) (sizeof(struct perf_event_header)));
+    __u64       perf_record_sz = 0llu;
 
-        const __u64  data_size      = perf_metadata->data_size;
-        __u64        data_tail      = __atomic_load_n(&perf_metadata->data_tail, __ATOMIC_ACQUIRE);
-        __u64        data_head;
-        const __u64  aux_size       = perf_metadata->aux_size;
-        const __u64  perf_header_sz = ((__u64) (sizeof(struct perf_event_header)));
-        __u64        perf_record_sz = 0llu;
-
-        int status;
-        unsigned long long int intel_pt_enable_tsc;
-        unsigned long long int intel_pt_disable_tsc;
+    int status;
+    unsigned long long int intel_pt_enable_tsc;
+    unsigned long long int intel_pt_disable_tsc;
 #if defined(EN_PTRACE_UNWIND)
-        unsigned long long int perfed_attach_tsc;
-        unsigned long long int perfed_detach_tsc;
-        unsigned long long int perfed_ptrace_a;
-        unsigned long long int perfed_ptrace_b;
+    unsigned long long int perfed_attach_tsc;
+    unsigned long long int perfed_detach_tsc;
+    unsigned long long int perfed_ptrace_a;
+    unsigned long long int perfed_ptrace_b;
 #endif
 
-        perfing_is_running = 1u;
-        fprintf(stdout,
-                "perfing from cpu %2d via fd %2d on pid %6d at cpu %2d\n",
-                perfing_cpu,
-                perfing_fd,
-                perfed_pid,
-                perfed_cpu);
+    perfing_is_running = 1u;
+    fprintf(stdout,
+            "perfing from cpu %2d via fd %2d on pid %6d at cpu %2d\n",
+            perfing_cpu,
+            perfing_fd,
+            perfed_pid,
+            perfed_cpu);
 
-        (void) posix_memalign(((void**) (&data_buffer)), AUX_ALIGNMENT, DATA_BUFFER_SIZE * sizeof(__u8)); memset(data_buffer, 0x00, DATA_BUFFER_SIZE * sizeof(__u8));
-        (void) posix_memalign(((void**) (&aux_buffer)),  AUX_ALIGNMENT, AUX_BUFFER_SIZE * sizeof(__u8));  memset(aux_buffer,  0x00, AUX_BUFFER_SIZE * sizeof(__u8));
-        perf_record = ((perf_record_t*) (data_buffer));
+    (void) posix_memalign(((void**) (&data_buffer)), AUX_ALIGNMENT, DATA_BUFFER_SIZE * sizeof(__u8)); memset(data_buffer, 0x00, DATA_BUFFER_SIZE * sizeof(__u8));
+    (void) posix_memalign(((void**) (&aux_buffer)),  AUX_ALIGNMENT, AUX_BUFFER_SIZE * sizeof(__u8));  memset(aux_buffer,  0x00, AUX_BUFFER_SIZE * sizeof(__u8));
+    perf_record = ((perf_record_t*) (data_buffer));
 
-        // Load the kernel module by stopping the perfed pid
-        if (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1l) {
-            const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
+    // Load the kernel module by stopping the perfed pid
+    if (ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL) != -1l) {
+      const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
 
-            if (perfed_pid_wait == perfed_pid) {
-                if (WIFSTOPPED(status)) {
-                    perfed_kmod(perfed_pid);
-                    ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
-                }
-            } else {
-                fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
-            }
+      if (perfed_pid_wait == perfed_pid) {
+        if (WIFSTOPPED(status)) {
+          perfed_kmod(perfed_pid);
+          ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
         }
+      } else {
+        fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
+      }
+    }
 #if defined(EN_PTRACE_BRK)
-        perfed_brks(perfed_pid);
+    perfed_brks(perfed_pid);
 #endif
 
-        intel_pt_enable(perfing_fd); intel_pt_enable_tsc = read_tsc(); fprintf(stdout, "Running Intel PT at %20.2lf ...\n", ((double) (intel_pt_enable_tsc)));
-        for (;;) {
-            const unsigned long long int a = read_tsc();
+    intel_pt_enable(perfing_fd); intel_pt_enable_tsc = read_tsc(); fprintf(stdout, "Running Intel PT at %20.2lf ...\n", ((double) (intel_pt_enable_tsc)));
+    for (;;) {
+      const unsigned long long int a = read_tsc();
 
-            data_head = __atomic_load_n(&perf_metadata->data_head, __ATOMIC_ACQUIRE);
-            if (data_tail + perf_header_sz <= data_head) {
-                // Replace this loop with non-temporal stores
-                for (__u64 i = 0llu; i < perf_header_sz; i++) {
-                    data_header[ i ] = perf_data_buffer[ (i + data_tail) % data_size ];
-                }
-                data_tail      += perf_header_sz;
-                perf_record_sz  = ((__u64) (perf_header.size)) - perf_header_sz;
+      data_head = __atomic_load_n(&perf_metadata->data_head, __ATOMIC_ACQUIRE);
+      if (data_tail + perf_header_sz <= data_head) {
+        // Replace this loop with non-temporal stores
+        for (__u64 i = 0llu; i < perf_header_sz; i++) {
+          data_header[ i ] = perf_data_buffer[ (i + data_tail) % data_size ];
+        }
+        data_tail      += perf_header_sz;
+        perf_record_sz  = ((__u64) (perf_header.size)) - perf_header_sz;
 
-                if (data_tail + perf_record_sz <= data_head) {
-                    // Replace this loop with non-temporal stores
-                    for (__u64 i = 0llu; i < perf_record_sz; i++) {
-                        data_buffer[ i ] = perf_data_buffer[ (i + data_tail) % data_size ];
-                    }
-                    data_tail += perf_record_sz;
-                    __atomic_store_n(&perf_metadata->data_tail, data_tail, __ATOMIC_RELEASE);
+        if (data_tail + perf_record_sz <= data_head) {
+          // Replace this loop with non-temporal stores
+          for (__u64 i = 0llu; i < perf_record_sz; i++) {
+            data_buffer[ i ] = perf_data_buffer[ (i + data_tail) % data_size ];
+          }
+          data_tail += perf_record_sz;
+          __atomic_store_n(&perf_metadata->data_tail, data_tail, __ATOMIC_RELEASE);
 
-                    switch (perf_header.type) {
-                        case PERF_RECORD_LOST: {
-                            if (perf_record->record_lost.sample_id.tid != ((__u32) (perfed_pid))) {
-                                break;
-                            }
+          switch (perf_header.type) {
+            case PERF_RECORD_LOST: {
+              if (perf_record->record_lost.sample_id.tid != ((__u32) (perfed_pid))) {
+                break;
+              }
 
-                            no_record_lost++;
-                            fprintf(stdout,
-                                    "        RECORD_LOST :: %20llu %12llu %12llu :: %6u\n",
-                                    perf_record->record_lost.sample_id.time,
-                                    perf_record->record_lost.id,
-                                    perf_record->record_lost.lost,
-                                    no_record_lost);
-                        } break;
+              no_record_lost++;
+              fprintf(stdout,
+                      "    RECORD_LOST :: %20llu %12llu %12llu :: %6u\n",
+                      perf_record->record_lost.sample_id.time,
+                      perf_record->record_lost.id,
+                      perf_record->record_lost.lost,
+                      no_record_lost);
+            } break;
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wzero-length-bounds"
 #pragma GCC diagnostic ignored "-Wstringop-overread"
-                        case PERF_RECORD_MMAP2: {
-                            if (perf_record->record_mmap2.id.tid != ((__u32) (perfed_pid))) {
-                                break;
-                            }
+            case PERF_RECORD_MMAP2: {
+              if (perf_record->record_mmap2.id.tid != ((__u32) (perfed_pid))) {
+                break;
+              }
 
-                            fprintf(stdout,
-                                    "       RECORD_MMAP2 :: %16llx - %16llx %c%c%c%c %s\n",
-                                    perf_record->record_mmap2.addr,
-                                    perf_record->record_mmap2.addr + perf_record->record_mmap2.len,
-                                    (perf_record->record_mmap2.prot & PROT_READ)   ? ('r') : ('-'),
-                                    (perf_record->record_mmap2.prot & PROT_WRITE)  ? ('w') : ('-'),
-                                    (perf_record->record_mmap2.prot & PROT_EXEC)   ? ('x') : ('-'),
-                                    (perf_record->record_mmap2.flags & MAP_SHARED) ? ('s') : ('p'),
-                                    &perf_record->record_mmap2.filename[ 0u ]);
+              fprintf(stdout,
+                      "     RECORD_MMAP2 :: %16llx - %16llx %c%c%c%c %s\n",
+                      perf_record->record_mmap2.addr,
+                      perf_record->record_mmap2.addr + perf_record->record_mmap2.len,
+                      (perf_record->record_mmap2.prot & PROT_READ)   ? ('r') : ('-'),
+                      (perf_record->record_mmap2.prot & PROT_WRITE)  ? ('w') : ('-'),
+                      (perf_record->record_mmap2.prot & PROT_EXEC)   ? ('x') : ('-'),
+                      (perf_record->record_mmap2.flags & MAP_SHARED) ? ('s') : ('p'),
+                      &perf_record->record_mmap2.filename[ 0u ]);
 
-                            if (perf_record->record_mmap2.prot & PROT_EXEC) {
-                                fprintf(stdout, "New executable mapping\n");
-                            } else if ((perf_record->record_mmap2.prot & PROT_READ)  &&
-                                       (perf_record->record_mmap2.prot & PROT_WRITE) &&
-                                       (perf_record->record_mmap2.flags & MAP_PRIVATE)) {
-                                if (strstr(&perf_record->record_mmap2.filename[ 0u ], "anon") != NULL) {
-                                    fprintf(stdout, "New possible stack\n");
-                                } else if (strstr(&perf_record->record_mmap2.filename[ 0u ], "heap") != NULL) {
-                                    // Check if the increasing of the heap changed the executable mappings
-                                }
-                            }
-                        } break;
+              if (perf_record->record_mmap2.prot & PROT_EXEC) {
+                fprintf(stdout, "New executable mapping\n");
+              } else if ((perf_record->record_mmap2.prot & PROT_READ) && (perf_record->record_mmap2.prot & PROT_WRITE) && (perf_record->record_mmap2.flags & MAP_PRIVATE)) {
+                if (strstr(&perf_record->record_mmap2.filename[ 0u ], "anon") != NULL) {
+                  fprintf(stdout, "New possible stack\n");
+                } else if (strstr(&perf_record->record_mmap2.filename[ 0u ], "heap") != NULL) {
+                  // Check if the increasing of the heap changed the executable mappings
+                }
+              }
+            } break;
 #pragma GCC diagnostic pop
 
-                        case PERF_RECORD_AUX: {
-                            const __u64 aux_head      = __atomic_load_n(&perf_metadata->aux_head, __ATOMIC_ACQUIRE);
-                            const __u64 aux_tail      = __atomic_load_n(&perf_metadata->aux_tail, __ATOMIC_ACQUIRE);
-                            const __u64 rc_aux_offset = perf_record->record_aux.aux_offset;
-                            const __u64 rc_aux_size   = perf_record->record_aux.aux_size;
+            case PERF_RECORD_AUX: {
+              const __u64 aux_head      = __atomic_load_n(&perf_metadata->aux_head, __ATOMIC_ACQUIRE);
+              const __u64 aux_tail      = __atomic_load_n(&perf_metadata->aux_tail, __ATOMIC_ACQUIRE);
+              const __u64 rc_aux_offset = perf_record->record_aux.aux_offset;
+              const __u64 rc_aux_size   = perf_record->record_aux.aux_size;
 
-                            // Some sanity checks
-                            if (aux_util > 1.0f) {
-                                fprintf(stderr,
-                                        "PERF_RECORD_AUX util error :: %12llu %12llu\n",
-                                        aux_head - aux_tail,
-                                        aux_size); for (;;) {}
-                            }
-                            if (rc_aux_offset != aux_tail) {
-                                fprintf(stderr,
-                                        "PERF_RECORD_AUX tail error :: %12llu %12llu\n",
-                                        rc_aux_offset, aux_tail); for (;;) {}
-                            }
+              // Some sanity checks
+              if (aux_util > 1.0f) {
+                fprintf(stderr,
+                        "PERF_RECORD_AUX util error :: %12llu %12llu\n",
+                        aux_head - aux_tail,
+                        aux_size); for (;;) {}
+              }
+              if (rc_aux_offset != aux_tail) {
+                fprintf(stderr,
+                        "PERF_RECORD_AUX tail error :: %12llu %12llu\n",
+                        rc_aux_offset, aux_tail); for (;;) {}
+              }
 
-                            aux_util = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
-                            if (aux_util > aux_util_max) {
-                                aux_util_max = aux_util;
-                            }
+              aux_util = ((double) (aux_head - aux_tail)) / ((double) (aux_size));
+              if (aux_util > aux_util_max) {
+                aux_util_max = aux_util;
+              }
 #if defined(EN_PTRACE_UNWIND)
-                            if ((perfed_status == PERFED_STATUS_RUNNING)    &&
-                                (intel_pt_status == INTEL_PT_STATUS_ENABLE) &&
-                                (unwind_queue[ unwind_queue_head ].no_insts == 0u)) {
-                                long ret;
+              if ((perfed_status == PERFED_STATUS_RUNNING) && (intel_pt_status == INTEL_PT_STATUS_ENABLE) && (unwind_queue[ unwind_queue_head ].no_insts == 0u)) {
+                long ret;
 
-                                perfed_ptrace_a = a;
-                                errno = 0;
-                                ret   = ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL); perfed_attach_tsc = a;
-                                if (ret == -1l) {
-                                    fprintf(stderr, "PTRACE_ATTACH failed %s\n", strerror(errno)); for (;;) {}
-                                } else {
-                                    const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
+                perfed_ptrace_a = a;
 
-                                    perfed_status = PERFED_STATUS_PTRACED;
-                                    if (perfed_pid_wait == perfed_pid) {
-                                        if (WIFSTOPPED(status)) {
-                                            unwind_insts_t* unwind_insts = NULL;
+                errno = 0;
+                ret   = ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL); perfed_attach_tsc = a;
+                if (ret == -1l) {
+                  fprintf(stderr, "PTRACE_ATTACH failed %s\n", strerror(errno)); for (;;) {}
+                } else {
+                  const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
 
-                                            //intel_pt_disable(perfing_fd); intel_pt_disable_tsc = a;
+                  perfed_status = PERFED_STATUS_PTRACED;
+                  if (perfed_pid_wait == perfed_pid) {
+                    if (WIFSTOPPED(status)) {
+                      unwind_insts_t* unwind_insts = NULL;
 
-                                            errno = 0;
-                                            ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &ptrace_uregs);
-                                            if (ret == -1l) {
-                                                fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno)); for (;;) {}
-                                            } else {
-                                                unwind_insts = unwind(perfed_pid, &ptrace_uregs);
-                                            }
-                                            errno = 0;
-                                            ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL); perfed_detach_tsc = read_tsc();
-                                            if (ret == -1l) {
-                                                fprintf(stderr, "PTRACE_DETACH failed %s\n", strerror(errno)); for (;;) {}
-                                            }
-                                            perfed_status = PERFED_STATUS_RUNNING;
+                      //intel_pt_disable(perfing_fd); intel_pt_disable_tsc = a;
 
-                                            if (unwind_insts != NULL) {
-                                                unwind_insts->attach_tsc = perfed_attach_tsc;
-                                                unwind_insts->detach_tsc = perfed_detach_tsc;
+                      errno = 0;
+                      ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &ptrace_uregs);
+                      if (ret == -1l) {
+                        fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno)); for (;;) {}
+                      } else {
+                        unwind_insts = unwind(perfed_pid, &ptrace_uregs);
+                      }
+                      errno = 0;
+                      ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL); perfed_detach_tsc = read_tsc();
+                      if (ret == -1l) {
+                        fprintf(stderr, "PTRACE_DETACH failed %s\n", strerror(errno)); for (;;) {}
+                      }
+                      perfed_status = PERFED_STATUS_RUNNING;
 
-                                                fprintf(stdout,
-                                                        "attach = %12.2lf us :: l_ptrace = %12.2lf ms\n",
-                                                        ((double) (perfed_detach_tsc - perfed_attach_tsc)) * tsc_hz_ns / 1000.0f,
-                                                        ((double) (perfed_ptrace_a - perfed_ptrace_b)) * tsc_hz_ns / 1000000.0f);
-                                                perfed_ptrace_b = perfed_ptrace_a;
-                                            }
-                                        }
-                                    } else {
-                                        fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
-                                    }
-                                }
-                            }
+                      if (unwind_insts != NULL) {
+                        unwind_insts->attach_tsc = perfed_attach_tsc;
+                        unwind_insts->detach_tsc = perfed_detach_tsc;
+
+                        fprintf(stdout,
+                                "attach = %12.2lf us :: l_ptrace = %12.2lf ms :: \e[0;31m%12.5lf\e[0m\n",
+                                ((double) (perfed_detach_tsc - perfed_attach_tsc)) * tsc_hz_ns / 1000.0f,
+                                ((double) (perfed_ptrace_a - perfed_ptrace_b)) * tsc_hz_ns / 1000000.0f,
+                                aux_util);
+                        perfed_ptrace_b = perfed_ptrace_a;
+                      }
+                    }
+                  } else {
+                    fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
+                  }
+                }
+              }
 #endif
 
-                            no_record_aux++;
-                            sz_record_aux += rc_aux_size;
+              no_record_aux++;
+              sz_record_aux += rc_aux_size;
 #if defined(PRINT_RECORD)
-                            fprintf(stdout,
-                                    "         RECORD_AUX :: %20llu %12u %12u \e[0;31m%12llu %12.5lf %12.5lf\e[0m %6u\n",
-                                    perf_record->record_aux.id.time,
-                                    perf_record->record_aux.id.cpu,
-                                    perf_record->record_aux.id.tid,
-                                    rc_aux_size,
-                                    aux_util,
-                                    aux_util_max,
-                                    no_record_aux);
+              fprintf(stdout,
+                      "     RECORD_AUX :: %20llu %12u %12u \e[0;31m%12llu %12.5lf %12.5lf\e[0m %6u\n",
+                      perf_record->record_aux.id.time,
+                      perf_record->record_aux.id.cpu,
+                      perf_record->record_aux.id.tid,
+                      rc_aux_size,
+                      aux_util,
+                      aux_util_max,
+                      no_record_aux);
 #endif
 
-                            if (perf_record->record_aux.flags == 0llu) {
-                                if (((rc_aux_offset % aux_size) + rc_aux_size) >= aux_size) {
-                                    __u64       j   = 0llu;
-                                    const __u64 j_a = AUX_ALIGNMENT * (rc_aux_size / AUX_ALIGNMENT);
-                                    const __u64 j_b = rc_aux_size % AUX_ALIGNMENT;
+              if (perf_record->record_aux.flags == 0llu) {
+                if (((rc_aux_offset % aux_size) + rc_aux_size) >= aux_size) {
+                  __u64     j     = 0llu;
+                  const __u64 j_a = AUX_ALIGNMENT * (rc_aux_size / AUX_ALIGNMENT);
+                  const __u64 j_b = rc_aux_size % AUX_ALIGNMENT;
 
-                                    // Some sanity checks
-                                    if (rc_aux_size > AUX_BUFFER_SIZE) {
-                                        fprintf(stderr,
-                                                "PERF_RECORD_AUX aux_buffer error :: %10llu vs %10llu!\n",
-                                                AUX_BUFFER_SIZE,
-                                                rc_aux_size); for (;;) {}
-                                    }
-                                    // Perform non-temporal copy
-                                    for (j = 0llu; j < j_a; j += AUX_ALIGNMENT) {
-                                        const __u64 j_c = (j + rc_aux_offset) % aux_size;
+                  // Some sanity checks
+                  if (rc_aux_size > AUX_BUFFER_SIZE) {
+                    fprintf(stderr,
+                            "PERF_RECORD_AUX aux_buffer error :: %10llu vs %10llu!\n",
+                            AUX_BUFFER_SIZE,
+                            rc_aux_size); for (;;) {}
+                  }
+                  // Perform non-temporal copy
+                  for (j = 0llu; j < j_a; j += AUX_ALIGNMENT) {
+                    const __u64 j_c = (j + rc_aux_offset) % aux_size;
 
-                                        if (j_c + AUX_ALIGNMENT < aux_size) {
+                    if (j_c + AUX_ALIGNMENT < aux_size) {
 #if (AUX_MEMCPY == AUX_MEMCPY_SSE)
-                                            __m128i* dst = ((__m128i*) (&aux_buffer[ j ]));
-                                            __m128i* src = ((__m128i*) (&perf_aux_buffer[ j_c ]));
+                      __m128i* dst = ((__m128i*) (&aux_buffer[ j ]));
+                      __m128i* src = ((__m128i*) (&perf_aux_buffer[ j_c ]));
 
-                                            _mm_stream_si128(dst, _mm_loadu_si128(src));
+                      _mm_stream_si128(dst, _mm_loadu_si128(src));
 #elif (AUX_MEMCPY == AUX_MEMCPY_AVX)
-                                            __m256i* dst = ((__m256i*) (&aux_buffer[ j ]));
-                                            __m256i* src = ((__m256i*) (&perf_aux_buffer[ j_c ]));
+                      __m256i* dst = ((__m256i*) (&aux_buffer[ j ]));
+                      __m256i* src = ((__m256i*) (&perf_aux_buffer[ j_c ]));
 
-                                            _mm256_stream_si256(dst, _mm256_loadu_si256(src));
+                      _mm256_stream_si256(dst, _mm256_loadu_si256(src));
 #else
 #endif
-                                        } else {
-                                            for (__u64 k = 0llu; k < AUX_ALIGNMENT; k++) {
-                                                aux_buffer[ j + k ] = perf_aux_buffer[ (j + k + rc_aux_offset) % aux_size ];
-                                            }
-                                        }
-                                    }
-                                    for (__u64 k = 0llu; k < j_b; k++) {
-                                        aux_buffer[ j + k ] = perf_aux_buffer[ (j + k + rc_aux_offset) % aux_size ];
-                                    }
-                                    // Commit all non-temporal stores
-                                    _mm_sfence();
+                    } else {
+                      for (__u64 k = 0llu; k < AUX_ALIGNMENT; k++) {
+                        aux_buffer[ j + k ] = perf_aux_buffer[ (j + k + rc_aux_offset) % aux_size ];
+                      }
+                    }
+                  }
+                  for (__u64 k = 0llu; k < j_b; k++) {
+                    aux_buffer[ j + k ] = perf_aux_buffer[ (j + k + rc_aux_offset) % aux_size ];
+                  }
+                  // Commit all non-temporal stores
+                  _mm_sfence();
 
-                                    (void) intel_pt_decode(((unsigned char*) (&aux_buffer[ 0u ])),
-                                                           ((unsigned long long int) (rc_aux_size)),
-                                                           aux_head,
-                                                           &perf_metadata->aux_head);
-                                } else {
-                                    (void) intel_pt_decode(((unsigned char*) (&perf_aux_buffer[ rc_aux_offset % aux_size ])),
-                                                           ((unsigned long long int) (rc_aux_size)),
-                                                           aux_head,
-                                                           &perf_metadata->aux_head);
-                                }
+                  (void) intel_pt_decode(((unsigned char*) (&aux_buffer[ 0u ])),
+                                         ((unsigned long long int) (rc_aux_size)),
+                                         aux_head,
+                                         &perf_metadata->aux_head);
+                } else {
+                  (void) intel_pt_decode(((unsigned char*) (&perf_aux_buffer[ rc_aux_offset % aux_size ])),
+                                         ((unsigned long long int) (rc_aux_size)),
+                                         aux_head,
+                                         &perf_metadata->aux_head);
+                }
 
-                                __atomic_store_n(&perf_metadata->aux_tail, rc_aux_offset + rc_aux_size, __ATOMIC_RELEASE);
-                            }
-                            if (perf_record->record_aux.flags != 0llu) {
-                                fprintf(stdout, "AUX FLAGS = %04llx\n", perf_record->record_aux.flags);
-                                perfing_is_running = 2u;
-                            }
-                        } break;
+                __atomic_store_n(&perf_metadata->aux_tail, rc_aux_offset + rc_aux_size, __ATOMIC_RELEASE);
+              }
+              if (perf_record->record_aux.flags != 0llu) {
+                fprintf(stdout, "AUX FLAGS = %04llx\n", perf_record->record_aux.flags);
+                perfing_is_running = 2u;
+              }
+            } break;
 
-                        case PERF_RECORD_ITRACE_START: {
+            case PERF_RECORD_ITRACE_START: {
 #if defined(PRINT_RECORD)
-                            fprintf(stdout,
-                                    "       ITRACE_START :: %20s %12u %12u\n",
-                                    "",
-                                    perf_record->record_itrace_start.pid,
-                                    perf_record->record_itrace_start.tid);
+              fprintf(stdout,
+                      "     ITRACE_START :: %20s %12u %12u\n",
+                      "",
+                      perf_record->record_itrace_start.pid,
+                      perf_record->record_itrace_start.tid);
 #endif
-                        } break;
+            } break;
 
-                        case PERF_RECORD_LOST_SAMPLES: {
-                            if (perf_record->record_lost_samples.id.tid != ((__u32) (perfed_pid))) {
-                                break;
-                            }
+            case PERF_RECORD_LOST_SAMPLES: {
+              if (perf_record->record_lost_samples.id.tid != ((__u32) (perfed_pid))) {
+                break;
+              }
 
 #if defined(PRINT_RECORD)
-                            fprintf(stdout,
-                                    "RECORD_LOST_SAMPLES :: %20llu %12.3lf ns\n",
-                                    perf_record->record_lost_samples.id.time,
-                                    ((double) (perf_record->record_lost_samples.lost)) * tsc_hz_ns);
+              fprintf(stdout,
+                      "RECORD_LOST_SAMPLES :: %20llu %12.3lf ns\n",
+                      perf_record->record_lost_samples.id.time,
+                      ((double) (perf_record->record_lost_samples.lost)) * tsc_hz_ns);
 #endif
-                        } break;
+            } break;
 
-                        case PERF_RECORD_SWITCH: {
-                            memcpy(&switch_id, &perf_record->record_switch.id, sizeof(sample_id_t));
-                            if (switch_id.tid != ((__u32) (perfed_pid))) {
-                                break;
-                            }
+            case PERF_RECORD_SWITCH: {
+              memcpy(&switch_id, &perf_record->record_switch.id, sizeof(sample_id_t));
+              if (switch_id.tid != ((__u32) (perfed_pid))) {
+                break;
+              }
 
-                            goto do_switch_util;
-                        } break;
+              goto do_switch_util;
+            } break;
 
-                        case PERF_RECORD_SWITCH_CPU_WIDE: {
-                            memcpy(&switch_id, &perf_record->record_switch_wide.id, sizeof(sample_id_t));
-                            if (switch_id.tid != ((__u32) (perfed_pid))) {
-                                break;
-                            }
+            case PERF_RECORD_SWITCH_CPU_WIDE: {
+              memcpy(&switch_id, &perf_record->record_switch_wide.id, sizeof(sample_id_t));
+              if (switch_id.tid != ((__u32) (perfed_pid))) {
+                break;
+              }
 
 do_switch_util:
-                            switch_ref = switch_id.time;
-                            if (no_record_switch == 0u) {
-                                switch_in       = 0llu;
-                                last_switch_out = switch_ref;
-                                switch_out      = 0llu;
-                                last_switch_in  = switch_ref;
-                                switch_util     = 0.0f;
-                            } else {
-                                if (perf_header.misc & PERF_RECORD_MISC_SWITCH_OUT) {
-                                    switch_in       += switch_ref - last_switch_in;
-                                    last_switch_out  = switch_ref;
-                                } else {
-                                    switch_out      += switch_ref - last_switch_out;
-                                    last_switch_in   = switch_ref;
-                                }
-                                switch_util = ((double) (switch_in)) / ((double) (switch_in + switch_out));
-                            }
+              switch_ref = switch_id.time;
+              if (no_record_switch == 0u) {
+                switch_in       = 0llu;
+                last_switch_out = switch_ref;
+                switch_out      = 0llu;
+                last_switch_in  = switch_ref;
+                switch_util     = 0.0f;
+              } else {
+                if (perf_header.misc & (PERF_RECORD_MISC_SWITCH_OUT | PERF_RECORD_MISC_SWITCH_OUT_PREEMPT)) {
+                  switch_in       += switch_ref - last_switch_in;
+                  last_switch_out  = switch_ref;
+                } else {
+                  switch_out     += switch_ref - last_switch_out;
+                  last_switch_in  = switch_ref;
+                }
+                switch_util = ((double) (switch_in)) / ((double) (switch_in + switch_out));
+              }
 
-                            no_record_switch++;
+              no_record_switch++;
 #if defined(PRINT_RECORD)
-                            fprintf(stdout,
-                                    "      RECORD_SWITCH :: %20llu %12u %12u \e[0;31m%12.5lf\e[0m %14s :: %6u\n",
-                                    switch_id.time,
-                                    switch_id.cpu,
-                                    switch_id.tid,
-                                    switch_util,
-                                    (perf_header.misc & (PERF_RECORD_MISC_SWITCH_OUT | PERF_RECORD_MISC_SWITCH_OUT_PREEMPT)) ? ("ON  -> OFF") : ("OFF ->  ON"),
-                                    no_record_switch);
+              fprintf(stdout,
+                      "    RECORD_SWITCH :: %20llu %12u %12u \e[0;31m%12.5lf\e[0m %14s :: %6u\n",
+                      switch_id.time,
+                      switch_id.cpu,
+                      switch_id.tid,
+                      switch_util,
+                      (perf_header.misc & (PERF_RECORD_MISC_SWITCH_OUT | PERF_RECORD_MISC_SWITCH_OUT_PREEMPT)) ? ("ON  -> OFF") : ("OFF ->  ON"),
+                      no_record_switch);
 #endif
 #if 0
-                            if (sw_util_queue[ sw_util_queue_head ].tsc == 0.0f) {
-                                sw_util_queue[ sw_util_queue_head ] = (sw_util_t) {
-                                    .tsc  = switch_id.time,
-                                    .out  = (perf_header.misc & (PERF_RECORD_MISC_SWITCH_OUT | PERF_RECORD_MISC_SWITCH_OUT_PREEMPT)) ? (1u) : (0u),
-                                    .util = switch_util
-                                };
-                                sw_util_queue_head = (sw_util_queue_head + 1u) % SW_UTIL_QUEUE_LEN;
-                            }
+              if (sw_util_queue[ sw_util_queue_head ].tsc == 0.0f) {
+                sw_util_queue[ sw_util_queue_head ] = (sw_util_t) {
+                  .tsc  = switch_id.time,
+                  .out  = (perf_header.misc & (PERF_RECORD_MISC_SWITCH_OUT | PERF_RECORD_MISC_SWITCH_OUT_PREEMPT)) ? (1u) : (0u),
+                  .util = switch_util
+                };
+                sw_util_queue_head = (sw_util_queue_head + 1u) % SW_UTIL_QUEUE_LEN;
+              }
 #endif
-                        } break;
+            } break;
 
-                        default: {
-                            fprintf(stdout, "      RECORD_xxxxxx :: %2u\n", perf_header.type);
-                        } break;
-                    }
-                }
-            } else {
-#if defined(EN_PTRACE_UNWIND)
-                if (intel_pt_status == INTEL_PT_STATUS_DISABLE) {
-                    intel_pt_enable(perfing_fd); intel_pt_enable_tsc = read_tsc();
-                    fprintf(stdout,
-                            "INTEL_PT_INACTIVE_TIME = %20.2lf ms\n",
-                            ((double) (intel_pt_enable_tsc - intel_pt_disable_tsc)) * tsc_hz_ns / 1000000.0f);
-                }
-#endif
-            }
-
-            if (perfing_is_running == 0u) {
-                fprintf(stdout, "Killing Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
-
-                fprintf(stdout, "no_record_aux = %u\n", no_record_aux);
-                fprintf(stdout, "sz_record_aux = %llu MB\n", sz_record_aux / ONE_MB);
-
-                break;
-            } else if (perfing_is_running == 2u) {
-                fprintf(stdout, "Disabling Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
-                perfing_is_running = 1u;
-                break;
-            }
+            default: {
+              fprintf(stdout, "    RECORD_xxxxxx :: %2u\n", perf_header.type);
+            } break;
+          }
         }
-    } else {
-        fprintf(stderr, "pthread_setaffinity_np failed %s\n", strerror(ret));
-    }
-
-    intel_pt_disable(perfing_fd);
-#if defined(EN_PMU)
-    pmu_close();
+      } else {
+#if defined(EN_PTRACE_UNWIND)
+        if (intel_pt_status == INTEL_PT_STATUS_DISABLE) {
+          intel_pt_enable(perfing_fd); intel_pt_enable_tsc = read_tsc();
+          fprintf(stdout,
+                  "INTEL_PT_INACTIVE_TIME = %20.2lf ms\n",
+                  ((double) (intel_pt_enable_tsc - intel_pt_disable_tsc)) * tsc_hz_ns / 1000000.0f);
+        }
 #endif
-    if (munmap(perf_aux_buffer, perf_metadata->aux_size) != 0) {
-        fprintf(stderr, "munmap AUX failed %s\n", strerror(errno));
+      }
+
+      if (perfing_is_running == 0u) {
+        fprintf(stdout, "Killing Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
+
+        fprintf(stdout, "no_record_aux = %u\n", no_record_aux);
+        fprintf(stdout, "sz_record_aux = %llu MB\n", sz_record_aux / ONE_MB);
+
+        break;
+      } else if (perfing_is_running == 2u) {
+        fprintf(stdout, "Disabling Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
+        perfing_is_running = 1u;
+        break;
+      }
     }
-    if (munmap(perf_metadata, MMAP_SIZE) != 0) {
-        fprintf(stderr, "munmap DATA failed %s\n", strerror(errno));
-    }
-    close(perfing_fd);
+  } else {
+    fprintf(stderr, "pthread_setaffinity_np failed %s\n", strerror(ret));
+  }
+
+  intel_pt_disable(perfing_fd);
+#if defined(EN_PMU)
+  pmu_close();
+#endif
+  if (munmap(perf_aux_buffer, perf_metadata->aux_size) != 0) {
+    fprintf(stderr, "munmap AUX failed %s\n", strerror(errno));
+  }
+  if (munmap(perf_metadata, MMAP_SIZE) != 0) {
+    fprintf(stderr, "munmap DATA failed %s\n", strerror(errno));
+  }
+  close(perfing_fd);
 
 #if defined(EN_PTRACE_UNWIND)
-    unwind_close();
+  unwind_close();
 #endif
-    kmod_close();
+  kmod_close();
 #if defined(EN_PTRACE_BRK)
-    brk_close();
+  brk_close();
 #endif
-    xed_close();
-    free(data_buffer);
-    free(aux_buffer);
-    pthread_exit(NULL);
+  xed_close();
+  free(data_buffer);
+  free(aux_buffer);
+  pthread_exit(NULL);
 }
 
 static void perfing_setup(void) {
-    int       ret;
-    pthread_t perfing_thread;
+  int       ret;
+  pthread_t perfing_thread;
 
-    ret = pthread_create(&perfing_thread, NULL, perfing_main, NULL);
-    if (ret == 0) {
-        pthread_join(perfing_thread, NULL);
-    } else {
-        fprintf(stderr, "pthread_create failed %s\n", strerror(ret));
-    }
+  ret = pthread_create(&perfing_thread, NULL, perfing_main, NULL);
+  if (ret == 0) {
+    pthread_join(perfing_thread, NULL);
+  } else {
+    fprintf(stderr, "pthread_create failed %s\n", strerror(ret));
+  }
 }
 
 static void perfed_setup(void) {
-    int       ret;
-    cpu_set_t cpu_set;
+  int       ret;
+  cpu_set_t cpu_set;
 
-    CPU_ZERO(&cpu_set);
-    CPU_SET(perfed_cpu, &cpu_set);
+  CPU_ZERO(&cpu_set);
+  CPU_SET(perfed_cpu, &cpu_set);
 
-    ret = sched_setaffinity(0, sizeof(cpu_set), &cpu_set);
-    if (ret == 0) {
-        struct perf_event_attr perf_attrs;
+  ret = sched_setaffinity(0, sizeof(cpu_set), &cpu_set);
+  if (ret == 0) {
+    struct perf_event_attr perf_attrs;
 
-        memset(&perf_attrs, 0, sizeof(perf_attrs));
-        perf_attrs.type           = INTEL_PT_TYPE;
-        perf_attrs.size           = sizeof(struct perf_event_attr);
-        perf_attrs.config         = INTEL_PT_CONFIG;
-        //perf_attrs.sample_period  = 10llu;
-        perf_attrs.sample_freq    = 2500llu;
-        perf_attrs.sample_type    = PERF_SAMPLE_IP   |
-                                    PERF_SAMPLE_TID  |
-                                    PERF_SAMPLE_TIME |
-                                    PERF_SAMPLE_CPU;
-        perf_attrs.read_format    = PERF_FORMAT_ID;
-        perf_attrs.disabled       = 1;
-        //perf_attrs.pinned         = 1;
-        //perf_attrs.exclusive      = 1;
+    memset(&perf_attrs, 0, sizeof(perf_attrs));
+    perf_attrs.type           = INTEL_PT_TYPE;
+    perf_attrs.size           = sizeof(struct perf_event_attr);
+    perf_attrs.config         = INTEL_PT_CONFIG;
+    //perf_attrs.sample_period  = 10llu;
+    perf_attrs.sample_freq    = 2500llu;
+    perf_attrs.sample_type    = PERF_SAMPLE_IP   |
+                                PERF_SAMPLE_TID  |
+                                PERF_SAMPLE_TIME |
+                                PERF_SAMPLE_CPU;
+    perf_attrs.read_format    = PERF_FORMAT_ID;
+    perf_attrs.disabled       = 1;
+    //perf_attrs.pinned         = 1;
+    //perf_attrs.exclusive      = 1;
 #if defined(EN_VMLINUX)
-        perf_attrs.exclude_kernel = 0;
+    perf_attrs.exclude_kernel = 0;
 #else
-        perf_attrs.exclude_kernel = 1;
+    perf_attrs.exclude_kernel = 1;
 #endif
-        //perf_attrs.exclude_hv     = 1;
-        //perf_attrs.exclude_idle   = 1;
-        perf_attrs.mmap           = 1;
-        perf_attrs.comm           = 1;
-        perf_attrs.freq           = 1;
-        perf_attrs.precise_ip     = 3;
-        perf_attrs.mmap_data      = 1;
-        perf_attrs.sample_id_all  = 1;
-        //perf_attrs.exclude_host   = 1;
-        //perf_attrs.exclude_guest   = 1;
-        perf_attrs.mmap2          = 1;
-        perf_attrs.comm_exec      = 1;
-        perf_attrs.use_clockid    = 1;
-        perf_attrs.context_switch = 1;
-        perf_attrs.ksymbol        = 1;
-        perf_attrs.bpf_event      = 1;
-        //perf_attrs.aux_output     = 1;
-        perf_attrs.text_poke      = 1;
-        perf_attrs.clockid        = CLOCK_TSC;
-        perf_attrs.aux_watermark  = ONE_MB;
+    //perf_attrs.exclude_hv     = 1;
+    //perf_attrs.exclude_idle   = 1;
+    perf_attrs.mmap           = 1;
+    perf_attrs.comm           = 1;
+    perf_attrs.freq           = 1;
+    perf_attrs.precise_ip     = 3;
+    perf_attrs.mmap_data      = 1;
+    perf_attrs.sample_id_all  = 1;
+    //perf_attrs.exclude_host   = 1;
+    //perf_attrs.exclude_guest  = 1;
+    perf_attrs.mmap2          = 1;
+    perf_attrs.comm_exec      = 1;
+    perf_attrs.use_clockid    = 1;
+    perf_attrs.context_switch = 1;
+    perf_attrs.ksymbol        = 1;
+    perf_attrs.bpf_event      = 1;
+    //perf_attrs.aux_output     = 1;
+    perf_attrs.text_poke      = 1;
+    perf_attrs.clockid        = CLOCK_TSC;
+    perf_attrs.aux_watermark  = ONE_MB;
 
-        perfing_fd = syscall(SYS_perf_event_open,
-                             &perf_attrs,
+    perfing_fd = syscall(SYS_perf_event_open,
+                         &perf_attrs,
 #if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-                            -1,
+                         -1,
 #else
-                             perfed_pid,
+                         perfed_pid,
 #endif
-                             perfed_cpu,
-                             -1,
-                             PERF_FLAG_FD_CLOEXEC);
-        fprintf(stdout, "Confing Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
-        if (perfing_fd != -1) {
-            void* p = mmap(NULL,
-                           MMAP_SIZE,
-                           PROT_READ | PROT_WRITE,
-                           MAP_SHARED,
-                           perfing_fd,
-                           0);
-            if (p != MAP_FAILED) {
-                perf_metadata = ((struct perf_event_mmap_page* ) (p));
+                         perfed_cpu,
+                         -1,
+                         PERF_FLAG_FD_CLOEXEC);
+    fprintf(stdout, "Confing Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
+    if (perfing_fd != -1) {
+      void* p = mmap(NULL,
+                     MMAP_SIZE,
+                     PROT_READ | PROT_WRITE,
+                     MAP_SHARED,
+                     perfing_fd,
+                     0);
+      if (p != MAP_FAILED) {
+        perf_metadata = ((struct perf_event_mmap_page* ) (p));
 
-                perf_metadata->aux_offset = perf_metadata->data_offset + perf_metadata->data_size;
-                perf_metadata->aux_size   = MMAP_AUX_SIZE;
-                p = mmap(NULL,
-                         perf_metadata->aux_size,
-                         PROT_READ | PROT_WRITE,
-                         MAP_SHARED,
-                         perfing_fd,
-                         perf_metadata->aux_offset);
-                if (p != MAP_FAILED) {
+        perf_metadata->aux_offset = perf_metadata->data_offset + perf_metadata->data_size;
+        perf_metadata->aux_size   = MMAP_AUX_SIZE;
+        p = mmap(NULL,
+                 perf_metadata->aux_size,
+                 PROT_READ | PROT_WRITE,
+                 MAP_SHARED,
+                 perfing_fd,
+                 perf_metadata->aux_offset);
+        if (p != MAP_FAILED) {
 #if defined(EN_PTRACE_UNWIND)
-                    perfed_unwind(perfed_pid);
+          perfed_unwind(perfed_pid);
 #endif
-                    perfed_xed(perfed_pid);
-                    perfed_proc(perfed_pid, NULL);
+          perfed_xed(perfed_pid);
+          perfed_proc(perfed_pid, NULL);
 #if defined(EN_PMU)
-                    perfed_pmu(perfed_pid, perfed_cpu, perfing_fd);
+          perfed_pmu(perfed_pid, perfed_cpu, perfing_fd);
 #endif
-                    perfed_msr();
+          perfed_msr();
 
-                    fprintf(stdout, "perf_metadata->data_head   = %10llu\n", perf_metadata->data_head);
-                    fprintf(stdout, "perf_metadata->data_tail   = %10llu\n", perf_metadata->data_tail);
-                    fprintf(stdout, "perf_metadata->data_offset = %10llu\n", perf_metadata->data_offset);
-                    fprintf(stdout, "perf_metadata->data_size   = %10llu MB\n", perf_metadata->data_size / ONE_MB);
-                    fprintf(stdout, "perf_metadata->aux_head    = %10llu\n", perf_metadata->aux_head);
-                    fprintf(stdout, "perf_metadata->aux_tail    = %10llu\n", perf_metadata->aux_tail);
-                    fprintf(stdout, "perf_metadata->aux_offset  = %10llu MB\n", perf_metadata->aux_offset / ONE_MB);
-                    fprintf(stdout, "perf_metadata->aux_size    = %10llu MB\n", perf_metadata->aux_size / ONE_MB);
+          fprintf(stdout, "perf_metadata->data_head   = %10llu\n", perf_metadata->data_head);
+          fprintf(stdout, "perf_metadata->data_tail   = %10llu\n", perf_metadata->data_tail);
+          fprintf(stdout, "perf_metadata->data_offset = %10llu\n", perf_metadata->data_offset);
+          fprintf(stdout, "perf_metadata->data_size   = %10llu MB\n", perf_metadata->data_size / ONE_MB);
+          fprintf(stdout, "perf_metadata->aux_head    = %10llu\n", perf_metadata->aux_head);
+          fprintf(stdout, "perf_metadata->aux_tail    = %10llu\n", perf_metadata->aux_tail);
+          fprintf(stdout, "perf_metadata->aux_offset  = %10llu MB\n", perf_metadata->aux_offset / ONE_MB);
+          fprintf(stdout, "perf_metadata->aux_size    = %10llu MB\n", perf_metadata->aux_size / ONE_MB);
 
-                    perf_data_buffer = &((__u8*) (perf_metadata))[ perf_metadata->data_offset ];
-                    perf_aux_buffer  = ((__u8*) (p));
-                    perfing_setup();
-                } else {
-                    fprintf(stderr, "mmap AUX failed %s\n", strerror(errno));
-                }
-            } else {
-                fprintf(stderr, "mmap DATA failed %s\n", strerror(errno));
-            }
+          perf_data_buffer = &((__u8*) (perf_metadata))[ perf_metadata->data_offset ];
+          perf_aux_buffer  = ((__u8*) (p));
+          perfing_setup();
         } else {
-            fprintf(stderr, "perf_event_open failed %s\n", strerror(errno));
+          fprintf(stderr, "mmap AUX failed %s\n", strerror(errno));
         }
+      } else {
+        fprintf(stderr, "mmap DATA failed %s\n", strerror(errno));
+      }
     } else {
-        fprintf(stderr, "sched_setaffinity failed %s\n", strerror(errno));
+      fprintf(stderr, "perf_event_open failed %s\n", strerror(errno));
     }
+  } else {
+    fprintf(stderr, "sched_setaffinity failed %s\n", strerror(errno));
+  }
 }
 
 static void sig_action_SIGSEGV(int sig_no, siginfo_t* sig_info, void* u_ctx) {
-    (void) sig_no;
-    (void) sig_info;
-    (void) u_ctx;
+  (void) (sig_no);
+  (void) (sig_info);
+  (void) (u_ctx);
 }
 
 static void sig_action_SIGINT(int sig_no, siginfo_t* sig_info, void* u_ctx) {
-    (void) sig_no;
-    (void) sig_info;
-    (void) u_ctx;
+  (void) (sig_no);
+  (void) (sig_info);
+  (void) (u_ctx);
 
-    perfing_is_running = 0u;
+  perfing_is_running = 0u;
 }
 
 static void sig_action_SIGRT(int sig_no, siginfo_t* sig_info, void* u_ctx) {
-    (void) sig_no;
-    (void) sig_info;
-    (void) u_ctx;
+  (void) (sig_info);
+  (void) (u_ctx);
 
-    if (sig_no == SIGRTMIN + 0) {
-        fprintf(stdout, "SIG = %s\n", "New executable mapping");
+  if (sig_no == SIGRTMIN + 0) {
+    fprintf(stdout, "SIG = %s\n", "New executable mapping");
 
-        perfing_is_running = 2u;
-    } else if (sig_no == SIGRTMIN + 1) {
-        fprintf(stdout, "SIG = %s\n", "New possible stack");
+    perfing_is_running = 2u;
+  } else if (sig_no == SIGRTMIN + 1) {
+    fprintf(stdout, "SIG = %s\n", "New possible stack");
 
-        no_new_a_maps++;
-    } else if (sig_no == SIGRTMAX) {
-        fprintf(stdout, "SIG = %s\n", "New mapping");
-    } else {
-    }
+    no_new_a_maps++;
+  } else if (sig_no == SIGRTMAX) {
+    fprintf(stdout, "SIG = %s\n", "New mapping");
+  } else {
+  }
 }
 
 int main(int argc, char *argv[ ]) {
-    struct sigaction sig_action;
+  struct sigaction sig_action;
 
-    memset(&sig_action, 0, sizeof(sig_action));
-    sig_action.sa_flags     = SA_SIGINFO;
-    sig_action.sa_sigaction = &sig_action_SIGSEGV;
-    sigaction(SIGSEGV, &sig_action, NULL);
+  memset(&sig_action, 0, sizeof(sig_action));
+  sig_action.sa_flags     = SA_SIGINFO;
+  sig_action.sa_sigaction = &sig_action_SIGSEGV;
+  sigaction(SIGSEGV, &sig_action, NULL);
 
-    memset(&sig_action, 0, sizeof(sig_action));
-    sig_action.sa_flags     = SA_SIGINFO;
-    sig_action.sa_sigaction = &sig_action_SIGINT;
-    sigaction(SIGINT, &sig_action, NULL);
+  memset(&sig_action, 0, sizeof(sig_action));
+  sig_action.sa_flags     = SA_SIGINFO;
+  sig_action.sa_sigaction = &sig_action_SIGINT;
+  sigaction(SIGINT, &sig_action, NULL);
 
-    memset(&sig_action, 0, sizeof(sig_action));
-    sig_action.sa_flags     = SA_SIGINFO;
-    sig_action.sa_sigaction = &sig_action_SIGRT;
-    sigaction(SIGRTMIN + 0, &sig_action, NULL);
-    sigaction(SIGRTMIN + 1, &sig_action, NULL);
-    sigaction(SIGRTMAX,     &sig_action, NULL);
+  memset(&sig_action, 0, sizeof(sig_action));
+  sig_action.sa_flags     = SA_SIGINFO;
+  sig_action.sa_sigaction = &sig_action_SIGRT;
+  sigaction(SIGRTMIN + 0, &sig_action, NULL);
+  sigaction(SIGRTMIN + 1, &sig_action, NULL);
+  sigaction(SIGRTMAX,     &sig_action, NULL);
 
-    if (argc >= 4) {
-        perfed_pid  = atoi(argv[ 1u ]);
-        perfed_cpu  = atoi(argv[ 2u ]);
-        perfing_cpu = atoi(argv[ 3u ]);
+  if (argc >= 4) {
+    perfed_pid  = atoi(argv[ 1u ]);
+    perfed_cpu  = atoi(argv[ 2u ]);
+    perfing_cpu = atoi(argv[ 3u ]);
 #if defined(EN_PTRACE_BRK)
-        brking_cpu  = atoi(argv[ 4u ]);
+    brking_cpu  = atoi(argv[ 4u ]);
 #endif
 
-        if (perfed_pid >= 1) {
-            char  tmp[ TASK_COMM_LEN ];
-            FILE* fp;
+    if (perfed_pid >= 1) {
+      char  tmp[ TASK_COMM_LEN ];
+      FILE* fp;
 
-            snprintf(&tmp[ 0u ], sizeof(tmp), "/proc/%d/comm", perfed_pid);
-            fp = fopen(&tmp[ 0u ], "r");
-            if (fp != NULL) {
-                fscanf(fp, "%s", &perfed_name[ 0u ]);
+      snprintf(&tmp[ 0u ], sizeof(tmp), "/proc/%d/comm", perfed_pid);
+      fp = fopen(&tmp[ 0u ], "r");
+      if (fp != NULL) {
+        fscanf(fp, "%s", &perfed_name[ 0u ]);
 
-                fclose(fp);
-            }
-        }
-        {
-            unsigned int eax;
-            unsigned int ebx;
-            unsigned int ecx;
-            unsigned int edx;
+        fclose(fp);
+      }
+    }
+    {
+      unsigned int eax;
+      unsigned int ebx;
+      unsigned int ecx;
+      unsigned int edx;
 
-            // Leaf 00H
-            eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
-            __get_cpuid(0x00u, &eax, &ebx, &ecx, &edx);
-            fprintf(stdout,
-                    "CPUID 00H :: %08x %.4s%.4s%.4s\n",
-                    eax, ((char*) (&ebx)), ((char*) (&edx)), ((char*) (&ecx)));
-            // Leaf 01H
-            eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
-            __get_cpuid(0x01u, &eax, &ebx, &ecx, &edx);
-            fprintf(stdout,
-                    "CPUID 01H :: %08x %08x %08x %08x :: %4u %4u %4u\n",
-                    eax, ebx, ecx, edx,
-                    (eax >> 0u) & 0x0Fu,                                    // Stepping
-                    (((eax >> 16u) & 0x0Fu) << 4u) + ((eax >> 4u) & 0x0Fu), // Model
-                    ((eax >> 20u) & 0xFFu) + ((eax >> 8u) & 0x0Fu));        // Family
-            // Leaf 80000002H
-            eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
-            __get_cpuid(0x80000002u, &eax, &ebx, &ecx, &edx);
-            fprintf(stdout,
-                    "CPUID 0x80000002u :: %.4s %.4s%.4s%.4s\n",
-                    ((char*) (&eax)), ((char*) (&ebx)), ((char*) (&ecx)), ((char*) (&edx)));
-            // Leaf 80000003H
-            eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
-            __get_cpuid(0x80000003u, &eax, &ebx, &ecx, &edx);
-            fprintf(stdout,
-                    "CPUID 0x80000003u :: %.4s %.4s%.4s%.4s\n",
-                    ((char*) (&eax)), ((char*) (&ebx)), ((char*) (&ecx)), ((char*) (&edx)));
-            // Leaf 80000004H
-            eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
-            __get_cpuid(0x80000004u, &eax, &ebx, &ecx, &edx);
-            fprintf(stdout,
-                    "CPUID 0x80000004u :: %.4s %.4s%.4s%.4s\n",
-                    ((char*) (&eax)), ((char*) (&ebx)), ((char*) (&ecx)), ((char*) (&edx)));
-            // Leaf 07H :: ECX = 0
-            eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
-            __get_cpuid_count(0x07u, 0x00, &eax, &ebx, &ecx, &edx);
-            fprintf(stdout,
-                    "CPUID 07H :: %08x %08x %08x %08x :: %s\n",
-                    eax, ebx, ecx, edx,
-                    (ebx & (1u << 25u)) ? "Intel_PT" : "");
-            // Leaf 0AH
-            eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
-            __get_cpuid(0x0Au, &eax, &ebx, &ecx, &edx);
-            fprintf(stdout,
-                    "CPUID 0AH :: %08x %08x %08x %08x :: vPMU = %u :: noGPMUs = %u %u :: noFPMUs = %u %u\n",
-                    eax, ebx, ecx, edx,
-                    (eax >>  0u) & 0xFFu,
-                    (eax >>  8u) & 0xFFu,
-                    (eax >> 16u) & 0xFFu,
-                    (edx >>  0u) & 0x1Fu,
-                    (edx >>  5u) & 0xFFu);
-            // Leaf 14H :: ECX = 0
-            eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
-            __get_cpuid_count(0x14u, 0x00, &eax, &ebx, &ecx, &edx);
-            fprintf(stdout,
-                    "CPUID 14H :: %08x %08x %08x %08x\n",
-                    eax, ebx, ecx, edx);
-            fprintf(stdout, "\tCR3 Filtering Support = %02x\n", (ebx >> 0u) & 0x01u);
-            fprintf(stdout, "\tConfigurable PSB      = %02x\n", (ebx >> 1u) & 0x01u);
-            fprintf(stdout, "\tIP Filtering Support  = %02x\n", (ebx >> 2u) & 0x01u);
-            fprintf(stdout, "\tMTC Support           = %02x\n", (ebx >> 3u) & 0x01u);
-            fprintf(stdout, "\tPTWRITE Support       = %02x\n", (ebx >> 4u) & 0x01u);
-            fprintf(stdout, "\tEvent Trace Support   = %02x\n", (ebx >> 7u) & 0x01u);
-            fprintf(stdout, "\tTNT Disable Support   = %02x\n", (ebx >> 8u) & 0x01u);
-            // Leaf 14H :: ECX = 1
-            eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
-            __get_cpuid_count(0x14u, 0x01, &eax, &ebx, &ecx, &edx);
-            fprintf(stdout,
-                    "CPUID 14H :: %08x %08x %08x %08x\n",
-                    eax, ebx, ecx, edx);
-            fprintf(stdout, "\tMTC Period Bitmap     = %04x\n", (eax >> 16u) & 0xFFFFu);
-            fprintf(stdout, "\tCYC Threshold Bitmap  = %04x\n", (ebx >>  0u) & 0xFFFFu);
-            fprintf(stdout, "\tPSB Period Bitmap     = %04x\n", (ebx >> 16u) & 0xFFFFu);
-            // Leaf 15H
-            eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
-            __get_cpuid(0x15u, &eax, &ebx, &ecx, &edx);
-            fprintf(stdout,
-                    "CPUID 15H :: %08x %08x %08x %08x :: TSC       = %12u Hz :: %12.5lf\n",
-                    eax, ebx, ecx, edx,
-                    ecx * (ebx / eax),
-                    ((double) (ecx * (ebx / eax))) / 1e9);
-            tsc_ratio = ((unsigned long long int) (ebx / eax));
-            tsc_hz    = ((unsigned long long int) (ecx)) * tsc_ratio;
-            tsc_hz_ns = 1e9 / ((double) (tsc_hz));
-            // Leaf 16H
-            eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
-            __get_cpuid(0x16u, &eax, &ebx, &ecx, &edx);
-            fprintf(stdout,
-                    "CPUID 16H :: %08x %08x %08x %08x :: Base Freq = %12u MHz Max Freq = %12u MHz Bus Freq = %12u MHz\n",
-                    eax, ebx, ecx, edx,
-                    eax & 0xFFFFu,
-                    ebx & 0xFFFFu,
-                    ecx & 0xFFFFu);
-            base_hz = ((unsigned long long int) (eax & 0xFFFFu)) * 1000000llu;
-            bus_hz  = ((unsigned long long int) (ecx & 0xFFFFu)) * 1000000llu;
+      // Leaf 00H
+      eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
+      __get_cpuid(0x00u, &eax, &ebx, &ecx, &edx);
+      fprintf(stdout,
+              "CPUID 00H :: %08x %.4s%.4s%.4s\n",
+              eax, ((char*) (&ebx)), ((char*) (&edx)), ((char*) (&ecx)));
+      // Leaf 01H
+      eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
+      __get_cpuid(0x01u, &eax, &ebx, &ecx, &edx);
+      fprintf(stdout,
+              "CPUID 01H :: %08x %08x %08x %08x :: %4u %4u %4u\n",
+              eax, ebx, ecx, edx,
+              (eax >> 0u) & 0x0Fu,                                    // Stepping
+              (((eax >> 16u) & 0x0Fu) << 4u) + ((eax >> 4u) & 0x0Fu), // Model
+              ((eax >> 20u) & 0xFFu) + ((eax >> 8u) & 0x0Fu));        // Family
+      // Leaf 80000002H
+      eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
+      __get_cpuid(0x80000002u, &eax, &ebx, &ecx, &edx);
+      fprintf(stdout,
+              "CPUID 0x80000002u :: %.4s %.4s%.4s%.4s\n",
+              ((char*) (&eax)), ((char*) (&ebx)), ((char*) (&ecx)), ((char*) (&edx)));
+      // Leaf 80000003H
+      eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
+      __get_cpuid(0x80000003u, &eax, &ebx, &ecx, &edx);
+      fprintf(stdout,
+              "CPUID 0x80000003u :: %.4s %.4s%.4s%.4s\n",
+              ((char*) (&eax)), ((char*) (&ebx)), ((char*) (&ecx)), ((char*) (&edx)));
+      // Leaf 80000004H
+      eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
+      __get_cpuid(0x80000004u, &eax, &ebx, &ecx, &edx);
+      fprintf(stdout,
+              "CPUID 0x80000004u :: %.4s %.4s%.4s%.4s\n",
+              ((char*) (&eax)), ((char*) (&ebx)), ((char*) (&ecx)), ((char*) (&edx)));
+      // Leaf 07H :: ECX = 0
+      eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
+      __get_cpuid_count(0x07u, 0x00, &eax, &ebx, &ecx, &edx);
+      fprintf(stdout,
+              "CPUID 07H :: %08x %08x %08x %08x :: %s\n",
+              eax, ebx, ecx, edx,
+              (ebx & (1u << 25u)) ? "Intel_PT" : "");
+      // Leaf 0AH
+      eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
+      __get_cpuid(0x0Au, &eax, &ebx, &ecx, &edx);
+      fprintf(stdout,
+              "CPUID 0AH :: %08x %08x %08x %08x :: vPMU = %u :: noGPMUs = %u %u :: noFPMUs = %u %u\n",
+              eax, ebx, ecx, edx,
+              (eax >>  0u) & 0xFFu,
+              (eax >>  8u) & 0xFFu,
+              (eax >> 16u) & 0xFFu,
+              (edx >>  0u) & 0x1Fu,
+              (edx >>  5u) & 0xFFu);
+      // Leaf 14H :: ECX = 0
+      eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
+      __get_cpuid_count(0x14u, 0x00, &eax, &ebx, &ecx, &edx);
+      fprintf(stdout,
+              "CPUID 14H :: %08x %08x %08x %08x\n",
+              eax, ebx, ecx, edx);
+      fprintf(stdout, "\tCR3 Filtering Support = %02x\n", (ebx >> 0u) & 0x01u);
+      fprintf(stdout, "\tConfigurable PSB      = %02x\n", (ebx >> 1u) & 0x01u);
+      fprintf(stdout, "\tIP Filtering Support  = %02x\n", (ebx >> 2u) & 0x01u);
+      fprintf(stdout, "\tMTC Support           = %02x\n", (ebx >> 3u) & 0x01u);
+      fprintf(stdout, "\tPTWRITE Support       = %02x\n", (ebx >> 4u) & 0x01u);
+      fprintf(stdout, "\tEvent Trace Support   = %02x\n", (ebx >> 7u) & 0x01u);
+      fprintf(stdout, "\tTNT Disable Support   = %02x\n", (ebx >> 8u) & 0x01u);
+      // Leaf 14H :: ECX = 1
+      eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
+      __get_cpuid_count(0x14u, 0x01, &eax, &ebx, &ecx, &edx);
+      fprintf(stdout,
+              "CPUID 14H :: %08x %08x %08x %08x\n",
+              eax, ebx, ecx, edx);
+      fprintf(stdout, "\tMTC Period Bitmap    = %04x\n", (eax >> 16u) & 0xFFFFu);
+      fprintf(stdout, "\tCYC Threshold Bitmap = %04x\n", (ebx >>  0u) & 0xFFFFu);
+      fprintf(stdout, "\tPSB Period Bitmap    = %04x\n", (ebx >> 16u) & 0xFFFFu);
+      // Leaf 15H
+      eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
+      __get_cpuid(0x15u, &eax, &ebx, &ecx, &edx);
+      fprintf(stdout,
+              "CPUID 15H :: %08x %08x %08x %08x :: TSC     = %12u Hz :: %12.5lf\n",
+              eax, ebx, ecx, edx,
+              ecx * (ebx / eax),
+              ((double) (ecx * (ebx / eax))) / 1e9);
+      tsc_ratio = ((unsigned long long int) (ebx / eax));
+      tsc_hz    = ((unsigned long long int) (ecx)) * tsc_ratio;
+      tsc_hz_ns = 1e9 / ((double) (tsc_hz));
+      // Leaf 16H
+      eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
+      __get_cpuid(0x16u, &eax, &ebx, &ecx, &edx);
+      fprintf(stdout,
+              "CPUID 16H :: %08x %08x %08x %08x :: Base Freq = %12u MHz Max Freq = %12u MHz Bus Freq = %12u MHz\n",
+              eax, ebx, ecx, edx,
+              eax & 0xFFFFu,
+              ebx & 0xFFFFu,
+              ecx & 0xFFFFu);
+      base_hz = ((unsigned long long int) (eax & 0xFFFFu)) * 1000000llu;
+      bus_hz  = ((unsigned long long int) (ecx & 0xFFFFu)) * 1000000llu;
 
-            fprintf(stdout, "TSC  = %12llu %12llu %12.5lf\n", tsc_hz, tsc_ratio, tsc_hz_ns);
-            fprintf(stdout, "BASE = %12llu\n", base_hz);
-            fprintf(stdout, "BUS  = %12llu\n", bus_hz);
-        }
-
-        perfed_setup();
+      fprintf(stdout, "TSC  = %12llu %12llu %12.5lf\n", tsc_hz, tsc_ratio, tsc_hz_ns);
+      fprintf(stdout, "BASE = %12llu\n", base_hz);
+      fprintf(stdout, "BUS  = %12llu\n", bus_hz);
     }
 
-    fprintf(stdout, "Done!\n");
-    fflush(stdout);
-    return 0;
+    perfed_setup();
+  }
+
+  fprintf(stdout, "Done!\n");
+  fflush(stdout);
+  return 0;
 }

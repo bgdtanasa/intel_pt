@@ -120,7 +120,7 @@ static void update_pmu(const int fd, struct perf_event_mmap_page* pg, const __u6
 
 static struct perf_event_mmap_page* mmap_pmu(const int pmu_fd) {
   void* pmu_mem = mmap(NULL,
-                       4096,
+                       PAGE_SIZE,
                        PROT_READ | PROT_WRITE,
                        MAP_SHARED,
                        pmu_fd,
@@ -237,7 +237,7 @@ void pmu_close(void) {
   for (unsigned long long int i = 0llu; i < 64llu; i++) {
     if (pmus[ i ].fd >= 1) {
       ioctl(pmus[ i ].fd, PERF_EVENT_IOC_DISABLE, 0);
-      munmap(pmus[ i ].pg, 4096);
+      munmap(pmus[ i ].pg, PAGE_SIZE);
       close(pmus[ i ].fd);
     }
   }
