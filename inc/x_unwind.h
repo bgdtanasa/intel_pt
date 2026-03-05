@@ -3,13 +3,16 @@
 
 #include "xed.h"
 
+#include <stdio.h>
+
 #include <sys/user.h>
 
 #define MAX_NO_UNWIND_INSTS (256u)
 #define UNWIND_QUEUE_LEN    (32768u)
 
 typedef struct {
-  unsigned long long int tsc;
+  unsigned int           flags;
+
   unsigned int           no_insts;
   const inst_t*          insts[ MAX_NO_UNWIND_INSTS ];
 
@@ -25,6 +28,9 @@ extern void perfed_unwind(const int perfed_pid);
 
 extern unwind_insts_t* unwind(const int                            perfed_pid,
                               const struct user_regs_struct* const uregs);
+extern unsigned int drop_unwinds(const double a, const double b);
+extern void print_unwind(FILE* const fp);
+
 extern void unwind_close(void);
 
 #endif

@@ -11,12 +11,14 @@
 
 #include "x_dwarf.h"
 
+#include <stdio.h>
+
 #include <sys/user.h>
 
 #if 1
 #define PRINT_XED
 #else
-#if 1
+#if 0
 #define PRINT_XED_BRANCHES_ONLY
 #endif
 #endif
@@ -31,7 +33,7 @@
 #define INDIRECT_BRANCH      (1u << 2u)
 #define FAR_TRANSFER         (1u << 3u)
 
-#define MAX_NO_DWARF_UNWINDS (1000000llu)
+#define MAX_NO_DWARF_UNWINDS (3000000llu)
 #define MAX_NO_BINARIES      (512u)
 #define MAX_BINARY_LENGTH    (256u)
 #define MAX_NO_INSTS         (60000000llu)
@@ -158,6 +160,8 @@ extern void xed_intel_pt_ovf(const double                 tsc,
 extern void xed_intel_pt_pip(const unsigned long long int pgd,
                              const double                 tsc,
                              const unsigned long long int cyc_cnt);
+extern void xed_intel_pt_tsc(const double                 tsc,
+                             const unsigned long long int cyc_cnt);
 extern void xed_intel_pt_ovf_fup(const unsigned long long int ip,
                                  const double                 tsc,
                                  const unsigned long long int cyc_cnt);
@@ -181,7 +185,6 @@ extern void xed_tid_switch(const sw_util_t* const sw_util);
 #if defined(EN_PTRACE_UNWIND)
 extern void xed_ptrace_uregs(const double                         tsc,
                              const struct user_regs_struct* const uregs);
-extern void xed_ptrace_unwind(void* const p);
 #endif
 
 extern void xed_update_last_inst(const unsigned long long addr);

@@ -212,6 +212,9 @@ extern unsigned long long int base_hz;
 extern unsigned long long int bus_hz;
 static unsigned long long int cbr;
 
+static double last_tsc_pge;
+static double last_tsc_pgd;
+
 static unsigned long long int cyc_cnt_ref;
 
 double tsc_factor;
@@ -441,11 +444,11 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
   }
 
   if (tsc_approx_en == 1u) {
-    tsc_approx_ref      = (cbr_factor != 0.0f) ? (tsc_ref + tsc_approx_ctc + ((double) (tsc_approx_cyc * base_factor)) / ((double) (cbr_factor))) : (0.0f);
-    tsc_approx_err      = (tsc_approx_ref < tsc_approx_ref_prev) ? (tsc_approx_ref - tsc_approx_ref_prev) : (0.0f);
+    tsc_approx_ref      = (cbr_factor != 0.0) ? (tsc_ref + tsc_approx_ctc + ((double) (tsc_approx_cyc * base_factor)) / ((double) (cbr_factor))) : (0.0);
+    tsc_approx_err      = (tsc_approx_ref < tsc_approx_ref_prev) ? (tsc_approx_ref - tsc_approx_ref_prev) : (0.0);
     tsc_approx_ref_prev = tsc_approx_ref;
 
-    if ((type == INTEL_PT_PKT_TSC) && (tsc_approx_err < 0.0f)) {
+    if ((type == INTEL_PT_PKT_TSC) && (tsc_approx_err < 0.0)) {
 #if defined(PRINT_PT)
       fprintf(stdout, "\e[0;31mTSC_REAL_ERR  = %20.2lf\e[0m\n", tsc_approx_err);
 #endif
@@ -453,11 +456,12 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
       xed_tsc_err(tsc_approx_err);
     }
   } else {
-    tsc_approx_ref      = 0.0f;
-    tsc_approx_err      = 0.0f;
-    tsc_approx_ref_prev = 0.0f;
+    tsc_approx_ref      = 0.0;
+    tsc_approx_err      = 0.0;
+    tsc_approx_ref_prev = 0.0;
   }
 
+#if 0
   {
     sw_util_t* const sw_util = &sw_util_queue[ sw_util_queue_tail ];
 
@@ -468,15 +472,14 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
       sw_util_queue_tail = (sw_util_queue_tail + 1u) % SW_UTIL_QUEUE_LEN;
     }
   }
+#endif
 #if defined(EN_PTRACE_UNWIND)
   {
     unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
+    const double          attach_tsc   = ((double) (unwind_insts->attach_tsc));
 
-    if ((unwind_insts->no_insts >= 1u) && (unwind_insts->tsc != 0llu) && (tsc_approx_ref >= ((double) (unwind_insts->tsc)))) {
-      xed_ptrace_unwind(unwind_insts);
-
-      memset(unwind_insts, 0, sizeof(unwind_insts_t));
-      unwind_queue_tail = (unwind_queue_tail + 1u) % UNWIND_QUEUE_LEN;
+    if ((unwind_insts->no_insts >= 1u) && (tsc_approx_ref >= attach_tsc)) {
+      unwind_insts->flags = 1u;
     }
   }
 #endif
@@ -486,9 +489,9 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
           PRINT_FORMAT "%5u %16.2lf %16llu %20.2lf :: %16llu :: %16llx \e[0;31m%8.2lf\e[0m\n",
           intel_pt_pkt_names[ type ],
           intel_pt_pkt_hist_idx,
-          ((a == 1u) && (tsc_approx_en == 1u)) ? (tsc_approx_ctc) : (0.0f),
+          ((a == 1u) && (tsc_approx_en == 1u)) ? (tsc_approx_ctc) : (0.0),
           ((a == 1u) && (tsc_approx_en == 1u)) ? (tsc_approx_cyc) : (0llu),
-          ((a == 1u) && (tsc_approx_en == 1u)) ? (tsc_approx_ref) : (0.0f),
+          ((a == 1u) && (tsc_approx_en == 1u)) ? (tsc_approx_ref) : (0.0),
           cyc_cnt_ref,
           val,
           tsc_approx_err);
@@ -800,6 +803,9 @@ decode_again:
       record_intel_pt_pkt(INTEL_PT_PKT_OVF, 0llu, cyc_cnt_ref, x, n);
       xed_intel_pt_ovf(tsc_approx_ref, cyc_cnt_ref);
       xed_async_reset(0llu, tsc_approx_ref, cyc_cnt_ref);
+#if defined(EN_PTRACE_UNWIND)
+      drop_unwinds(last_tsc_pge, tsc_approx_ref);
+#endif
       x += 2llu;
       n -= 2llu;
       goto decode_again;
@@ -1062,6 +1068,7 @@ decode_again:
 #endif
 
       record_intel_pt_pkt(INTEL_PT_PKT_TSC, tsc, cyc_cnt_ref, x, n);
+      xed_intel_pt_tsc(tsc, cyc_cnt_ref);
       x += 8llu;
       n -= 8llu;
       goto decode_again;
@@ -1106,7 +1113,7 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & TIP_PGE_MASK) == TIP_PGE)) {
-      ip_decode(&x, &n, n_orig, INTEL_PT_PKT_TIP_PGE);
+      ip_decode(&x, &n, n_orig, INTEL_PT_PKT_TIP_PGE); last_tsc_pge = tsc_approx_ref;
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & TIP_MASK) == TIP)) {
@@ -1114,7 +1121,7 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 1llu) && (((*x_8) & TIP_PGD_MASK) == TIP_PGD)) {
-      ip_decode(&x, &n, n_orig, INTEL_PT_PKT_TIP_PGD);
+      ip_decode(&x, &n, n_orig, INTEL_PT_PKT_TIP_PGD); last_tsc_pgd = tsc_approx_ref;
       goto decode_again;
     }
     if ((n >= 9llu) && (((*x_8) & BIP_MASK) == BIP) && (last_bbp == 1u)) {

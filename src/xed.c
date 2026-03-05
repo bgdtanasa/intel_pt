@@ -145,7 +145,6 @@ static const inst_t* unwind_cache_high[ CACHE_LENGTH ];
 #endif
 static const inst_t* unwind_cache_low[ CACHE_LENGTH ];
 
-extern char   perfed_name[ ];
 extern double tsc_hz_ns;
 extern double tsc_factor;
 extern double cbr_factor;
@@ -167,8 +166,9 @@ static inline __attribute__((always_inline)) void update_inst_stats(const xed_ic
 }
 
 static void reset_inst_stats(const unsigned long long int cyc_cnt) {
-  const double ipc_0 = (inst_stats.n_ipc  >= 1u) ? (inst_stats.t_ipc  / ((double) (inst_stats.n_ipc)))  : (0.0f);
-  const double ipc_1 = (inst_stats.t_cycs >= 1u) ? (inst_stats.t_cnts / ((double) (inst_stats.t_cycs))) : (0.0f);
+#if 0
+  const double ipc_0 = (inst_stats.n_ipc  >= 1u) ? (inst_stats.t_ipc  / ((double) (inst_stats.n_ipc)))  : (0.0);
+  const double ipc_1 = (inst_stats.t_cycs >= 1u) ? (inst_stats.t_cnts / ((double) (inst_stats.t_cycs))) : (0.0);
 
   fprintf(branches_fp, "Eq e :: ####### %12.3lf %12.3lf\n", ipc_0, ipc_1);
   fprintf(branches_fp, "Eq b :: #######\n");
@@ -176,16 +176,19 @@ static void reset_inst_stats(const unsigned long long int cyc_cnt) {
     inst_stats.iclass_cnt[ i ] = 0u;
   }
   inst_stats.cyc_cnt_ref = cyc_cnt;
-  inst_stats.t_ipc       = 0.0f;
+  inst_stats.t_ipc       = 0.0;
   inst_stats.n_ipc       = 0u;
   inst_stats.t_cnts      = 0llu;
   inst_stats.t_cycs      = 0llu;
+#else
+  (void) (cyc_cnt);
+#endif
 }
 
 static void print_inst_stats(const unsigned long long int cyc_cnt) {
   unsigned int                 cnts = 0u;
   const unsigned long long int cycs = cyc_cnt - inst_stats.cyc_cnt_ref;
-  double                       ipc  = 0.0f;
+  double                       ipc  = 0.0;
 
   if (cycs >= 1llu) {
     //fprintf(branches_fp, "Eq %u :: ", ctx_idx);
@@ -689,12 +692,15 @@ extern void xed_intel_pt_pip(const unsigned long long int pgd,
   }
 }
 
+void xed_intel_pt_tsc(const double                 tsc,
+                      const unsigned long long int cyc_cnt __attribute__((unused))) {
+  fprintf(branches_fp, "TSC :: %20.2lf\n", tsc);
+}
+
 void xed_intel_pt_ovf_fup(const unsigned long long int ip,
                           const double                 tsc,
                           const unsigned long long int cyc_cnt) {
-  (void) (ip);
-  (void) (tsc);
-  (void) (cyc_cnt);
+  fprintf(branches_fp, "O_FUP :: %20.2lf %20llu %16llx\n", tsc, cyc_cnt, ip);
 }
 
 void xed_intel_pt_tip_enable(const unsigned long long int tip,
@@ -776,7 +782,7 @@ void xed_ptrace_uregs(const double                         tsc,
       this_ctx = &ctx[ 0u ];
       if (inst->cofi.type == 0u) {
         xed_update_last_inst(uregs->rip);
-        xed_process_branches(0u, 0u, 0llu, 0.0f, 0llu);
+        xed_process_branches(0u, 0u, 0llu, 0.0, 0llu);
       } else if (inst->cofi.type & COND_BRANCH) {
         unsigned int tnt = 2u;
 
@@ -887,7 +893,7 @@ void xed_ptrace_uregs(const double                         tsc,
 
         if (tnt <= 1u) {
           xed_update_last_inst(uregs->rip);
-          xed_process_branches(tnt, 1u, 0llu, 0.0f, 0llu);
+          xed_process_branches(tnt, 1u, 0llu, 0.0, 0llu);
         }
       }
       this_ctx = &ctx[ this_ctx_idx ];
@@ -903,35 +909,6 @@ void xed_ptrace_uregs(const double                         tsc,
   fprintf(branches_fp, "R :: %20.2lf  GS = %16llx\n", tsc, uregs->gs);
   fprintf(branches_fp, "R :: %20.2lf FSB = %16llx\n", tsc, uregs->fs_base);
   fprintf(branches_fp, "R :: %20.2lf GSB = %16llx\n", tsc, uregs->gs_base);
-}
-
-void xed_ptrace_unwind(void* const p) {
-  const unwind_insts_t* const unwind_insts = ((unwind_insts_t*) (p));
-
-  if (unwind_insts->no_insts >= 1u) {
-    fprintf(branches_fp, "AT :: %20.2lf\n", ((double) (unwind_insts->attach_tsc)));
-
-    fprintf(branches_fp,
-            "%s\t%d [%03d] %20.2lf: cpu-clock:\n",
-            &perfed_name[ 0u ],
-            0,
-            0,
-            ((double) (unwind_insts->tsc)));
-    for (unsigned int i = 0u; i < unwind_insts->no_insts; i++) {
-      const inst_t* const inst = unwind_insts->insts[ i ];
-
-      fprintf(branches_fp,
-              "\t%16llx %08llx_%s ([%s %016llx])\n",
-              inst->addr,
-              inst->addr - inst->base_addr,
-              inst->binary,
-              inst->binary,
-              inst->dwarf_unwind->addr - inst->dwarf_unwind->base_addr);
-    }
-    fprintf(branches_fp, "\n");
-
-    fprintf(branches_fp, "DT :: %20.2lf\n", ((double) (unwind_insts->detach_tsc)));
-  }
 }
 #endif
 
@@ -1021,6 +998,15 @@ void xed_process_branches(const unsigned int           tnt,
     if (this_ctx->last_inst == -1ll) {
       break;
     }
+#if defined(EN_PTRACE_UNWIND)
+    {
+      const unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
+
+      if ((unwind_insts->flags == 1u) && ((insts[ this_ctx->last_inst ].addr + 0llu == unwind_insts->insts[ 0u ]->addr) || (insts[ this_ctx->last_inst ].addr + 2llu == unwind_insts->insts[ 0u ]->addr))) {
+        print_unwind(branches_fp);
+      }
+    }
+#endif
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
 #if defined(PRINT_XED_BRANCHES_ONLY)
     if (insts[ this_ctx->last_inst ].cofi.type != 0u) {
@@ -1057,7 +1043,7 @@ void xed_process_branches(const unsigned int           tnt,
 #endif
       this_ctx->last_inst++;
 #if defined(PRINT_XED)
-      fprintf(branches_fp, "%s -> %16llx _ :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, 0.0f);
+      fprintf(branches_fp, "%s -> %16llx _ :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, 0.0);
 #endif
     } else {
       if (this_ctx->tnt_queue_tail != this_ctx->tnt_queue_head) {
@@ -1102,7 +1088,7 @@ void xed_process_branches(const unsigned int           tnt,
           if (x_tnt->cyc_cnt != 0llu) {
             print_inst_stats(x_tnt->cyc_cnt);
 
-            x_tnt->tsc     = 0.0f;
+            x_tnt->tsc     = 0.0;
             x_tnt->cyc_cnt = 0llu;
           }
         } else {
@@ -1113,7 +1099,7 @@ void xed_process_branches(const unsigned int           tnt,
           this_ctx->call_stack[ this_ctx->call_stack_idx ] = (call_stack_t) {
             .call       = &insts[ this_ctx->last_inst + 0ll ],
             .ret        = &insts[ this_ctx->last_inst + 1ll ],
-            .tsc_c      = 0.0f,
+            .tsc_c      = 0.0,
             .no_insts_c = 0llu
           };
           this_ctx->call_stack_idx++;
@@ -1125,14 +1111,14 @@ void xed_process_branches(const unsigned int           tnt,
           branches_n++;
           xed_update_last_inst(insts[ this_ctx->last_inst ].cofi.u.c.addr);
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-          fprintf(branches_fp, "%s -> %16llx U :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, 0.0f);
+          fprintf(branches_fp, "%s -> %16llx U :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, 0.0);
 #endif
         } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_UNCOND_BR) {
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;
           xed_update_last_inst(insts[ this_ctx->last_inst ].cofi.u.j.addr);
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-          fprintf(branches_fp, "%s -> %16llx U :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, 0.0f);
+          fprintf(branches_fp, "%s -> %16llx U :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, 0.0);
 #endif
         } else {
           // What to do in this case?!
@@ -1162,15 +1148,15 @@ void xed_process_branches(const unsigned int           tnt,
                 if (x_tnt->cyc_cnt != 0llu) {
                   print_inst_stats(x_tnt->cyc_cnt);
 
-                  x_tnt->tsc     = 0.0f;
+                  x_tnt->tsc     = 0.0;
                   x_tnt->cyc_cnt = 0llu;
                 }
                 continue;
               } else {
-                fflush(branches_fp); fprintf(stderr, "0 RET TNT\n"); for (;;) {}
+                xed_close(); fprintf(stderr, "0 RET TNT\n"); for (;;) {}
               }
             } else {
-              fflush(branches_fp); fprintf(stderr, "1 RET TNT\n"); for (;;) {}
+              xed_close(); fprintf(stderr, "1 RET TNT\n"); for (;;) {}
             }
           }
         }
@@ -1205,10 +1191,10 @@ void xed_process_branches(const unsigned int           tnt,
                 const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
                 const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
 
-                if ((tsc_c != 0.0f) && (tsc_r != 0.0f)) {
+                if ((tsc_c != 0.0) && (tsc_r != 0.0)) {
                   const double tsc_rc = tsc_r - tsc_c;
 
-                  if (tsc_rc < 0.0f) {
+                  if (tsc_rc < 0.0) {
                     //xed_close();
                     fprintf(stdout, "0 Broken call stack :: Negative call time %20.2lf %20.2lf => %20.2lf\n", tsc_c, tsc_r, tsc_rc); //for (;;) {}
                   }
@@ -1260,10 +1246,10 @@ void xed_process_branches(const unsigned int           tnt,
                 const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
                 const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
 
-                if ((tsc_c != 0.0f) && (tsc_r != 0.0f)) {
+                if ((tsc_c != 0.0) && (tsc_r != 0.0)) {
                   const double tsc_rc = tsc_r - tsc_c;
 
-                  if (tsc_rc < 0.0f) {
+                  if (tsc_rc < 0.0) {
                     //xed_close();
                     fprintf(stdout, "1 Broken call stack :: Negative call time %20.2lf %20.2lf => %20.2lf\n", tsc_c, tsc_r, tsc_rc); //for (;;) {}
                   }
@@ -1271,7 +1257,6 @@ void xed_process_branches(const unsigned int           tnt,
               }
             }
           }
-
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;
           xed_update_last_inst(x_tip->tip);

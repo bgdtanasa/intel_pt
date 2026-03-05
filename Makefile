@@ -24,7 +24,7 @@ CXX=gcc
 
 CPP_FLAGS=
 CPP_FLAGS+=-DEN_MTC
-#CPP_FLAGS+=-DEN_RET_COMPRESSION
+CPP_FLAGS+=-DEN_RET_COMPRESSION
 CPP_FLAGS+=-DEN_VMLINUX
 CPP_FLAGS+=-DEN_VMLINUX_WIDE
 #CPP_FLAGS+=-DEN_PMU
@@ -44,6 +44,10 @@ endif
 
 ifneq ($(filter -DEN_VMLINUX, $(CPP_FLAGS)), )
 CPP_FLAGS+=-DVMLINUX_STEXT=0xFFFFFFFF81000000llu
+else
+ifneq ($(filter -DEN_VMLINUX_WIDE, $(CPP_FLAGS)), )
+$(error -DEN_VMLINUX is not set in CPP_FLAGS)
+endif
 endif
 
 CFLAGS=$(INC_FLAGS) $(CPP_FLAGS) -flto -Wno-unused-result -m64 -mavx -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP

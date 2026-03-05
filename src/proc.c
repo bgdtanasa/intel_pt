@@ -94,7 +94,7 @@ static void update_modules(void) {
       if (n == 3) {
         const char* const binary = parse_get_binary(&name[ 0u ], 1u);
 
-        fprintf(stdout, "%llx %llx %64s :: no_binaries = %9u\n", a, b, &name[ 0u ], no_binaries);
+        fprintf(stdout, "%48s %16llx %16llx :: no_binaries = %9u\n", &name[ 0u ], a, b, no_binaries);
         for (unsigned long long int i = 0llu; i < no_insts; i++) {
           if ((a <= insts[ i ].addr) && (insts[ i ].addr < b)) {
             insts[ i ].binary    = binary;
@@ -162,7 +162,7 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
                 const unsigned int           is_pie    = binary_is_pie(line);
                 const unsigned long long int base_addr = (is_pie == 1u) ? (a - o) : (0llu);
 
-                fprintf(stdout, "%64s %08x %u :: ", binary, o, is_pie);
+                fprintf(stdout, "%48s %16llx %08x %u :: ", binary, base_addr, o, is_pie);
 #if defined(EN_PTRACE_UNWIND)
                 parse_dwarf(binary, base_addr);
 #endif
@@ -183,7 +183,11 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
     fprintf(stdout, "====== PROC ======\n");
 #if defined(EN_VMLINUX)
     fprintf(stdout, "====== KERNEL ======\n");
-    fprintf(stdout, "%64s %08llx %u :: ", "vmlinux", 0llu, 0u);
+#if defined(VMLINUX_STEXT)
+    fprintf(stdout, "%48s %16llx %08llx %u :: ", "vmlinux", VMLINUX_STEXT, 0llu, 0u);
+#else
+#error "VMLINUX_STEXT is not defined"
+#endif
 #if defined(EN_PTRACE_UNWIND)
     parse_dwarf("vmlinux", 0llu);
 #endif

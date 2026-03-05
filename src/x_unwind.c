@@ -3,13 +3,8 @@
 #include "proc.h"
 #include "utils.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#if 1
-#define DO_STATS
-#endif
 
 #define CACHE_NO_BITS (20u)
 #define CACHE_MASK    ((1 << (CACHE_NO_BITS)) - 1u)
@@ -22,6 +17,7 @@ unwind_insts_t* unwind_queue;
 unsigned int    unwind_queue_head;
 unsigned int    unwind_queue_tail;
 
+extern char   perfed_name[ ];
 extern double tsc_hz_ns;
 
 void perfed_unwind(const int perfed_pid __attribute__((unused))) {
@@ -40,9 +36,6 @@ unwind_insts_t* unwind(const int                            perfed_pid,
   const inst_t*          inst;
   const dwarf_unwind_t*  dwarf_unwind;
   unwind_insts_t* const  unwind_insts = &unwind_queue[ unwind_queue_head ];
-
-  unwind_insts->tsc      = read_tsc();
-  unwind_insts->no_insts = 0u;
 
   cfa_regs[  0u ] = ((unsigned long long int) (uregs->rax));
   cfa_regs[  1u ] = ((unsigned long long int) (uregs->rdx));
@@ -144,16 +137,72 @@ unwind_again:
   }
 unwind_done:
   unwind_queue_head = (unwind_queue_head + 1u) % UNWIND_QUEUE_LEN;
-#if defined(DO_STATS)
-  fprintf(stdout,
-          "unwind = %5u %12.2lf us %6u %6u :: ",
-          unwind_insts->no_insts,
-          ((double) (read_tsc() - unwind_insts->tsc)) * tsc_hz_ns / 1000.0f,
-          unwind_queue_tail,
-          unwind_queue_head);
-#endif
 
   return unwind_insts;
+}
+
+unsigned int drop_unwinds(const double a, const double b) {
+  unsigned int n = 0u;
+
+  if ((a == 0.0) || (b == 0.0)) {
+    return 0u;
+  }
+  for (;;) {
+    unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
+    const double          attach_tsc   = ((double) (unwind_insts->attach_tsc));
+
+    if ((a <= attach_tsc) && (attach_tsc <= b)) {
+      n++;
+      fprintf(stdout, "Dropping unwind at %20.2lf %20.2lf %20.2lf\n", a, attach_tsc, b);
+
+      memset(unwind_insts, 0, sizeof(unwind_insts_t));
+      unwind_queue_tail = (unwind_queue_tail + 1u) % UNWIND_QUEUE_LEN;
+      if (unwind_queue_tail > unwind_queue_head) {
+        unwind_queue_head = 0u;
+        unwind_queue_tail = 0u;
+
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+
+  return n;
+}
+
+void print_unwind(FILE* const fp) {
+  unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
+
+  if (unwind_insts->no_insts >= 1u) {
+    fprintf(fp, "AT :: %20.2lf\n", ((double) (unwind_insts->attach_tsc)));
+
+    fprintf(fp,
+            "%s\t%d [%03d] %20.2lf: cpu-clock: %6u %6u\n",
+            &perfed_name[ 0u ],
+            0,
+            0,
+            0.0,
+            unwind_queue_tail,
+            unwind_queue_head);
+    for (unsigned int i = 0u; i < unwind_insts->no_insts; i++) {
+      const inst_t* const inst = unwind_insts->insts[ i ];
+
+      fprintf(fp,
+              "\t%16llx %08llx_%s ([%s %016llx])\n",
+              inst->addr,
+              inst->addr - inst->base_addr,
+              inst->binary,
+              inst->binary,
+              inst->dwarf_unwind->addr - inst->dwarf_unwind->base_addr);
+    }
+    fprintf(fp, "\n");
+
+    fprintf(fp, "DT :: %20.2lf\n", ((double) (unwind_insts->detach_tsc)));
+
+    memset(unwind_insts, 0, sizeof(unwind_insts_t));
+    unwind_queue_tail = (unwind_queue_tail + 1u) % UNWIND_QUEUE_LEN;
+  }
 }
 
 void unwind_close(void) {

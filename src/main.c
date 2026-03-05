@@ -312,10 +312,10 @@ static void* perfing_main(void* args __attribute__((unused))) {
 
     unsigned long long int sz_record_aux = 0llu;
 
-    double aux_util     = 0.0f;
-    double aux_util_max = 0.0f;
+    double aux_util     = 0.0;
+    double aux_util_max = 0.0;
 
-    double      switch_util = 0.0f;
+    double      switch_util = 0.0;
     sample_id_t switch_id   = { 0 };
 
     const __u64 data_size      = perf_metadata->data_size;
@@ -326,13 +326,9 @@ static void* perfing_main(void* args __attribute__((unused))) {
     __u64       perf_record_sz = 0llu;
 
     int status;
-    unsigned long long int intel_pt_enable_tsc;
-    unsigned long long int intel_pt_disable_tsc;
 #if defined(EN_PTRACE_UNWIND)
     unsigned long long int perfed_attach_tsc;
     unsigned long long int perfed_detach_tsc;
-    unsigned long long int perfed_ptrace_a;
-    unsigned long long int perfed_ptrace_b;
 #endif
 
     perfing_is_running = 1u;
@@ -364,10 +360,8 @@ static void* perfing_main(void* args __attribute__((unused))) {
     perfed_brks(perfed_pid);
 #endif
 
-    intel_pt_enable(perfing_fd); intel_pt_enable_tsc = read_tsc(); fprintf(stdout, "Running Intel PT at %20.2lf ...\n", ((double) (intel_pt_enable_tsc)));
+    intel_pt_enable(perfing_fd); fprintf(stdout, "Running Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
     for (;;) {
-      const unsigned long long int a = read_tsc();
-
       data_head = __atomic_load_n(&perf_metadata->data_head, __ATOMIC_ACQUIRE);
       if (data_tail + perf_header_sz <= data_head) {
         // Replace this loop with non-temporal stores
@@ -437,7 +431,7 @@ static void* perfing_main(void* args __attribute__((unused))) {
               const __u64 rc_aux_size   = perf_record->record_aux.aux_size;
 
               // Some sanity checks
-              if (aux_util > 1.0f) {
+              if (aux_util > 1.0) {
                 fprintf(stderr,
                         "PERF_RECORD_AUX util error :: %12llu %12llu\n",
                         aux_head - aux_tail,
@@ -457,21 +451,19 @@ static void* perfing_main(void* args __attribute__((unused))) {
               if ((perfed_status == PERFED_STATUS_RUNNING) && (intel_pt_status == INTEL_PT_STATUS_ENABLE) && (unwind_queue[ unwind_queue_head ].no_insts == 0u)) {
                 long ret;
 
-                perfed_ptrace_a = a;
-
                 errno = 0;
-                ret   = ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL); perfed_attach_tsc = a;
+                ret   = ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL);
                 if (ret == -1l) {
                   fprintf(stderr, "PTRACE_ATTACH failed %s\n", strerror(errno)); for (;;) {}
                 } else {
                   const pid_t perfed_pid_wait = waitpid(perfed_pid, &status, 0);
 
-                  perfed_status = PERFED_STATUS_PTRACED;
                   if (perfed_pid_wait == perfed_pid) {
                     if (WIFSTOPPED(status)) {
                       unwind_insts_t* unwind_insts = NULL;
 
-                      //intel_pt_disable(perfing_fd); intel_pt_disable_tsc = a;
+                      perfed_attach_tsc = read_tsc();
+                      perfed_status     = PERFED_STATUS_PTRACED;
 
                       errno = 0;
                       ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &ptrace_uregs);
@@ -481,22 +473,24 @@ static void* perfing_main(void* args __attribute__((unused))) {
                         unwind_insts = unwind(perfed_pid, &ptrace_uregs);
                       }
                       errno = 0;
-                      ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL); perfed_detach_tsc = read_tsc();
+                      ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
                       if (ret == -1l) {
                         fprintf(stderr, "PTRACE_DETACH failed %s\n", strerror(errno)); for (;;) {}
                       }
-                      perfed_status = PERFED_STATUS_RUNNING;
+
+                      perfed_detach_tsc = read_tsc();
+                      perfed_status     = PERFED_STATUS_RUNNING;
 
                       if (unwind_insts != NULL) {
                         unwind_insts->attach_tsc = perfed_attach_tsc;
                         unwind_insts->detach_tsc = perfed_detach_tsc;
 
                         fprintf(stdout,
-                                "attach = %12.2lf us :: l_ptrace = %12.2lf ms :: \e[0;31m%12.5lf\e[0m\n",
-                                ((double) (perfed_detach_tsc - perfed_attach_tsc)) * tsc_hz_ns / 1000.0f,
-                                ((double) (perfed_ptrace_a - perfed_ptrace_b)) * tsc_hz_ns / 1000000.0f,
+                                "attach = %12.2lf us :: %6u %6u :: \e[0;31m%12.5lf\e[0m\n",
+                                ((double) (perfed_detach_tsc - perfed_attach_tsc)) * tsc_hz_ns / 1000.0,
+                                unwind_queue_tail,
+                                unwind_queue_head,
                                 aux_util);
-                        perfed_ptrace_b = perfed_ptrace_a;
                       }
                     }
                   } else {
@@ -626,7 +620,7 @@ do_switch_util:
                 last_switch_out = switch_ref;
                 switch_out      = 0llu;
                 last_switch_in  = switch_ref;
-                switch_util     = 0.0f;
+                switch_util     = 0.0;
               } else {
                 if (perf_header.misc & (PERF_RECORD_MISC_SWITCH_OUT | PERF_RECORD_MISC_SWITCH_OUT_PREEMPT)) {
                   switch_in       += switch_ref - last_switch_in;
@@ -650,7 +644,7 @@ do_switch_util:
                       no_record_switch);
 #endif
 #if 0
-              if (sw_util_queue[ sw_util_queue_head ].tsc == 0.0f) {
+              if (sw_util_queue[ sw_util_queue_head ].tsc == 0.0) {
                 sw_util_queue[ sw_util_queue_head ] = (sw_util_t) {
                   .tsc  = switch_id.time,
                   .out  = (perf_header.misc & (PERF_RECORD_MISC_SWITCH_OUT | PERF_RECORD_MISC_SWITCH_OUT_PREEMPT)) ? (1u) : (0u),
@@ -666,15 +660,6 @@ do_switch_util:
             } break;
           }
         }
-      } else {
-#if defined(EN_PTRACE_UNWIND)
-        if (intel_pt_status == INTEL_PT_STATUS_DISABLE) {
-          intel_pt_enable(perfing_fd); intel_pt_enable_tsc = read_tsc();
-          fprintf(stdout,
-                  "INTEL_PT_INACTIVE_TIME = %20.2lf ms\n",
-                  ((double) (intel_pt_enable_tsc - intel_pt_disable_tsc)) * tsc_hz_ns / 1000000.0f);
-        }
-#endif
       }
 
       if (perfing_is_running == 0u) {
