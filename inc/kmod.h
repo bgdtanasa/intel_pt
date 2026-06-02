@@ -16,6 +16,8 @@ extern unsigned long         perfed_pgd;
 extern kmaps_t               kmaps;
 extern unsigned long         no_kmaps;
 extern volatile unsigned int no_new_a_maps;
+extern unsigned long         mod_text_addr;
+extern unsigned long         mod_text_len;
 
 extern void perfed_kmod(const int perfed_pid);
 extern void kmod_close(void);

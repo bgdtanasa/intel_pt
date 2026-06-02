@@ -152,6 +152,9 @@ extern const char* parse_get_binary(const char* const xed_file, const unsigned i
 extern void        parse_dwarf(const char* const xed_file, const unsigned long long int base_addr);
 #endif
 extern void        parse_objdump(const int perfed_pid, const char* const xed_file, const unsigned long long int base_addr);
+#if defined(EN_VMLINUX)
+extern void        parse_vmlinux(void);
+#endif
 
 extern void perfed_xed(const int perfed_pid);
 
@@ -210,5 +213,7 @@ extern void                  xed_unwind_link_inst_to_dwarf(void);
 #endif
 
 extern void xed_close(void);
+
+extern unsigned int xed_is_enabled(void);
 
 #endif

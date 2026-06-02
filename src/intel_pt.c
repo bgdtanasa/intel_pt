@@ -63,7 +63,7 @@
 #if 0
 #define PRINT_PT
 #endif
-#if 0
+#if 1
 #define AUX_DBG
 #endif
 
@@ -643,19 +643,19 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   if (last_ip_update == 0u) {
   } else if (last_ip_update == 1u) {
 #if defined(AUX_DBG)
-    if ((ip != 0llu) && (xed_unwind_find_inst(ip) == NULL)) {
+    if ((xed_is_enabled() == 1u) && (ip != 0llu) && (xed_unwind_find_inst(ip) == NULL)) {
       xed_close();
 
       print_intel_pt_bytes(x_p, n_p, n_orig);
       print_intel_pt_pkts();
-      fprintf(stderr, "ip_decode error :: ip_bytes = %u ip = %16llx last_ip = %16llx\n", ip_bytes, ip, last_ip); for (;;) { }
+      fprintf(stderr, "ip_decode error :: 0 ip_bytes = %u ip = %16llx last_ip = %16llx\n", ip_bytes, ip, last_ip); for (;;) { }
     }
 #endif
     last_intel_pt_pkt->v.ip = ip;
 
     last_ip = ip;
   } else if (last_ip_update == 2u) {
-    fprintf(stderr, "ip_decode error :: 2 ip_bytes = %u n = %llu\n", ip_bytes, n_p); for (;;) { }
+    fprintf(stderr, "ip_decode error :: 1 ip_bytes = %u n = %llu\n", ip_bytes, n_p); for (;;) { }
   }
   *x = x_p;
   *n = n_p;
@@ -691,15 +691,15 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
         xed_process_branches(0u, 0u, ip, tsc_approx_ref, cyc_cnt_ref);
       }
     } else if (pkt_type == INTEL_PT_PKT_TIP_PGD) {
-      fprintf(stderr, "ip_decode error :: 0 ip = %16llx pkt_type = %3d\n", ip, pkt_type); for (;;) { }
+      fprintf(stderr, "ip_decode error :: 2 ip = %16llx pkt_type = %3d\n", ip, pkt_type); for (;;) { }
     } else {
-      fprintf(stderr, "ip_decode error :: 1 ip = %16llx pkt_type = %3d\n", ip, pkt_type); for (;;) { }
+      fprintf(stderr, "ip_decode error :: 3 ip = %16llx pkt_type = %3d\n", ip, pkt_type); for (;;) { }
     }
   } else {
     xed_intel_pt_tip_disable(tsc_approx_ref, cyc_cnt_ref);
 
     if (pkt_type != INTEL_PT_PKT_TIP_PGD) {
-      fprintf(stderr, "ip_decode error :: 2 ip = %16llx pkt_type = %3d\n", ip, pkt_type); for (;;) { }
+      fprintf(stderr, "ip_decode error :: 4 ip = %16llx pkt_type = %3d\n", ip, pkt_type); for (;;) { }
     }
   }
 
@@ -732,7 +732,7 @@ unsigned long long int intel_pt_decode(const volatile unsigned char*    x,
 decode_again:
   if (n >= 1llu) {
 #if defined(AUX_DBG)
-    if ((last_intel_pt_pkt != NULL) && (*last_intel_pt_pkt->x != last_intel_pt_pkt->y)) {
+    if ((last_intel_pt_pkt != NULL) && (last_intel_pt_pkt->type != INTEL_PT_PKT_NONE) && (last_intel_pt_pkt->x != NULL) && (*last_intel_pt_pkt->x != last_intel_pt_pkt->y)) {
       fprintf(stdout,
               "%4u " PRINT_FORMAT "%16llx %20llu :: %16llx %02x %02x %12llu :: %12llu %12llu :: %12llu %12llu\n",
               (INTEL_PT_PKT_HISTORY + intel_pt_pkt_hist_idx - 1u) % INTEL_PT_PKT_HISTORY,
@@ -924,7 +924,7 @@ decode_again:
 
       record_intel_pt_pkt(INTEL_PT_PKT_PIP, pgd, cyc_cnt_ref, x, n);
       xed_intel_pt_pip(pgd, tsc_approx_ref, cyc_cnt_ref);
-      if (pgd != ((unsigned long long int) (perfed_pgd))) {
+      if ((pgd != 0llu) && (pgd != ((unsigned long long int) (perfed_pgd)))) {
         xed_async_reset(0llu, tsc_approx_ref, cyc_cnt_ref);
       }
       x += 8llu;

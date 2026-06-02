@@ -77,40 +77,6 @@ pfn_again:
   close(fd_kpageflags);
 }
 
-#if defined(EN_VMLINUX)
-static void update_modules(void) {
-  FILE* const fp = fopen("resources/modules_addrs", "r");
-
-  if (fp != NULL) {
-    unsigned long long int a;
-    unsigned long long int b;
-
-    char name[ 128u ];
-
-    fprintf(stdout, "====== KERNEL MODULES ======\n");
-    for (;;) {
-      const int n = fscanf(fp, "%s %llx %llx\n", &name[ 0u ], &a, &b);
-
-      if (n == 3) {
-        const char* const binary = parse_get_binary(&name[ 0u ], 1u);
-
-        fprintf(stdout, "%48s %16llx %16llx :: no_binaries = %9u\n", &name[ 0u ], a, b, no_binaries);
-        for (unsigned long long int i = 0llu; i < no_insts; i++) {
-          if ((a <= insts[ i ].addr) && (insts[ i ].addr < b)) {
-            insts[ i ].binary    = binary;
-            insts[ i ].base_addr = a;
-          }
-        }
-      } else {
-        break;
-      }
-    }
-    fprintf(stdout, "====== KERNEL MODULES ======\n");
-    fclose(fp);
-  }
-}
-#endif
-
 void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
   FILE* fp;
 
@@ -181,21 +147,6 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
       }
     }
     fprintf(stdout, "====== PROC ======\n");
-#if defined(EN_VMLINUX)
-    fprintf(stdout, "====== KERNEL ======\n");
-#if defined(VMLINUX_STEXT)
-    fprintf(stdout, "%48s %16llx %08llx %u :: ", "vmlinux", VMLINUX_STEXT, 0llu, 0u);
-#else
-#error "VMLINUX_STEXT is not defined"
-#endif
-#if defined(EN_PTRACE_UNWIND)
-    parse_dwarf("vmlinux", 0llu);
-#endif
-    parse_objdump(perfed_pid, "vmlinux", 0llu);
-    fprintf(stdout, "====== KERNEL ======\n");
-
-    update_modules();
-#endif
 
 #if defined(EN_PTRACE_UNWIND)
     xed_unwind_link_inst_to_dwarf();
@@ -208,6 +159,64 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
             strerror(errno)); for (;;) {}
   }
 }
+
+#if defined(EN_VMLINUX)
+void proc_update_modules(void) {
+  FILE* const fp = fopen("/proc/modules", "r");
+  if (fp != NULL) {
+    for (;;) {
+      char* line = fgets(&buffer[ 0u ], ((int) (sizeof(buffer))), fp);
+      if (line != NULL) {
+        char                   module_name[ 256u ];
+        unsigned long long int module_size = 0llu;
+        unsigned long long int module_addr = 0llu;
+
+        if (sscanf(line, "%s %llu", &module_name[ 0u ], &module_size) == 2) {
+          line = strstr(line, "Live");
+          if (line != NULL) {
+            if (sscanf(line, "Live 0x%llx", &module_addr) == 1) {
+              if (module_addr >= VMLINUX_MTEXT) {
+                const unsigned long long a      = module_addr;
+                const unsigned long long b      = module_addr + module_size;
+                const char* const        binary = parse_get_binary(&module_name[ 0u ], 1u);
+                unsigned int             n      = 0u;
+
+                fprintf(stdout, "%48s %16llx %16llx :: no_binaries = %9u\n", binary, a, b, no_binaries);
+                for (unsigned long long int i = 0llu; i < no_insts; i++) {
+                  if ((a <= insts[ i ].addr) && (insts[ i ].addr < b)) {
+                    insts[ i ].binary    = binary;
+                    insts[ i ].base_addr = a;
+
+                    n++;
+                  }
+                }
+                if (n == 0u) {
+                  fprintf(stdout, "No instructions found for module %s\n", &module_name[ 0u ]);
+                }
+              } else {
+                fprintf(stdout, "Invalid address found for module %s at %16llx\n", &module_name[ 0u ], module_addr);
+              }
+            } else {
+              fprintf(stderr, "0 /proc/modules line parse failed :: %s\n", &buffer[ 0u ]);
+            }
+          }
+        } else {
+          fprintf(stderr, "1 /proc/modules line parse failed :: %s\n", &buffer[ 0u ]);
+        }
+      } else {
+        break;
+      }
+    }
+
+    fclose(fp);
+  } else {
+    fprintf(stderr,
+            "fopen(%s) failed :: %s\n",
+            "/proc/modules",
+            strerror(errno)); for (;;) {}
+  }
+}
+#endif
 
 unsigned long long int proc_read_perfed_vm(const int                    perfed_pid,
                                            const unsigned long long int addr) {

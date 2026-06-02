@@ -44,10 +44,14 @@ static int           perfed_pid;
 static unsigned long perfed_pgd;
 static unsigned long kmaps;
 static unsigned long no_kmaps;
-module_param(perfed_pid, int,   0644);
-module_param(perfed_pgd, ulong, 0644);
-module_param(kmaps,      ulong, 0644);
-module_param(no_kmaps,   ulong, 0644);
+static unsigned long mod_text_addr;
+static unsigned long mod_text_len;
+module_param(perfed_pid,    int,   0644);
+module_param(perfed_pgd,    ulong, 0644);
+module_param(kmaps,         ulong, 0644);
+module_param(no_kmaps,      ulong, 0644);
+module_param(mod_text_addr, ulong, 0644);
+module_param(mod_text_len,  ulong, 0644);
 
 static int    perfing_pid;
 unsigned long perfing_addr_a;
@@ -339,6 +343,9 @@ static ssize_t my_write(struct file* file, const char __user* buf, size_t count,
 }
 
 static int x_init(void) {
+  (void) copy_to_user((void*) (mod_text_addr), &THIS_MODULE->mem[ MOD_TEXT ].base, sizeof(mod_text_addr));
+  (void) copy_to_user((void*) (mod_text_len),  &THIS_MODULE->mem[ MOD_TEXT ].size, sizeof(mod_text_len));
+
   my_follow_page_t my_follow_page = (my_follow_page_t) kallsyms_lookup_name("follow_page");
   if (my_follow_page == NULL) {
     return -1;

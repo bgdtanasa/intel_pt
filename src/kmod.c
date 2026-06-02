@@ -14,6 +14,8 @@ unsigned long         perfed_pgd;
 kmaps_t               kmaps;
 unsigned long         no_kmaps;
 volatile unsigned int no_new_a_maps;
+unsigned long         mod_text_addr;
+unsigned long         mod_text_len;
 
 static const char* module_name = "kmod/main.ko";
 static char        module_params[ MAX_SZ_PARAMS ];
@@ -34,13 +36,17 @@ void perfed_kmod(const int perfed_pid) {
     perfed_pgd = 0lu;
     memset(&kmaps[ 0u ], 0, sizeof(kmaps));
     no_kmaps = 0lu;
+    mod_text_addr = 0lu;
+    mod_text_len  = 0lu;
     // Prepare the list of parameters
     sprintf(&module_params[ 0u ],
-            "perfed_pid=%d perfed_pgd=%lu kmaps=%lu no_kmaps=%lu",
+            "perfed_pid=%d perfed_pgd=%lu kmaps=%lu no_kmaps=%lu mod_text_addr=%lu mod_text_len=%lu",
             perfed_pid,
             ((unsigned long) (&perfed_pgd)),
             ((unsigned long) (&kmaps[ 0u ])),
-            ((unsigned long) (&no_kmaps)));
+            ((unsigned long) (&no_kmaps)),
+            ((unsigned long) (&mod_text_addr)),
+            ((unsigned long) (&mod_text_len)));
     ret = syscall(SYS_finit_module, fd, module_params, 0);
     if (ret == 0l) {
       fprintf(stdout, " finit_module(%s) success\n", module_name);
@@ -51,12 +57,14 @@ void perfed_kmod(const int perfed_pid) {
                 "open(/dev/my_char-0) failed :: %s\n",
                 strerror(errno)); for (;;) {}
       }
-      fprintf(stdout, "perfed_pgd = %16lx\n", perfed_pgd);
-      fprintf(stdout,
-              "my_char_fd = %d no_kmaps = %lu no_new_a_maps = %2u\n",
-              my_char_fd,
-              no_kmaps,
-              no_new_a_maps);
+      fprintf(stdout, "====== KMOD ======\n");
+      fprintf(stdout, "perfed_pgd    = %16lx\n", perfed_pgd);
+      fprintf(stdout, "my_char_fd    = %16d\n", my_char_fd);
+      fprintf(stdout, "no_kmaps      = %16lu\n", no_kmaps);
+      fprintf(stdout, "no_new_a_maps = %16u\n", no_new_a_maps);
+      fprintf(stdout, "mod_text_addr = %16lx\n", mod_text_addr);
+      fprintf(stdout, "mod_text_len  = %16lu\n", mod_text_len);
+      fprintf(stdout, "====== KMOD ======\n");
     } else {
       fprintf(stderr,
               "finit_module(%s) failed :: %s\n",

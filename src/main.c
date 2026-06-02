@@ -1,6 +1,7 @@
 #include <emmintrin.h>
 #include <immintrin.h>
 
+#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -351,6 +352,10 @@ static void* perfing_main(void* args __attribute__((unused))) {
         if (WIFSTOPPED(status)) {
           perfed_kmod(perfed_pid);
           ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
+
+#if defined(EN_VMLINUX)
+          parse_vmlinux();
+#endif
         }
       } else {
         fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
@@ -867,6 +872,8 @@ static void sig_action_SIGRT(int sig_no, siginfo_t* sig_info, void* u_ctx) {
 
 int main(int argc, char *argv[ ]) {
   struct sigaction sig_action;
+
+  mallopt(M_MMAP_THRESHOLD, 0);
 
   memset(&sig_action, 0, sizeof(sig_action));
   sig_action.sa_flags     = SA_SIGINFO;
