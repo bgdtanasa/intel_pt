@@ -643,7 +643,7 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   if (last_ip_update == 0u) {
   } else if (last_ip_update == 1u) {
 #if defined(AUX_DBG)
-    if ((xed_is_enabled() == 1u) && (ip != 0llu) && (xed_unwind_find_inst(ip) == NULL)) {
+    if ((xed_is_enabled(ip) == 1u) && (ip != 0llu) && (xed_unwind_find_inst(ip) == NULL)) {
       xed_close();
 
       print_intel_pt_bytes(x_p, n_p, n_orig);
@@ -669,7 +669,7 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
         last_intel_pt_pkt->type = INTEL_PT_PKT_FUP_OVF;
 
         xed_intel_pt_ovf_fup(ip, last_intel_pt_pkt_ovf->tsc_approx, last_intel_pt_pkt_ovf->cyc_cnt);
-        xed_async_reset(ip, last_intel_pt_pkt_ovf->tsc_approx, last_intel_pt_pkt_ovf->cyc_cnt);
+        xed_async_reset(ip, last_intel_pt_pkt_ovf->tsc_approx, last_intel_pt_pkt_ovf->cyc_cnt, __FILE__, __LINE__);
         xed_update_last_inst(ip);
         xed_process_branches(0u, 0u, 0llu, last_intel_pt_pkt_ovf->tsc_approx, last_intel_pt_pkt_ovf->cyc_cnt);
 
@@ -679,7 +679,7 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
       }
     } else if (pkt_type == INTEL_PT_PKT_TIP_PGE) {
       xed_intel_pt_tip_enable(ip, tsc_approx_ref, cyc_cnt_ref);
-      xed_async_reset(ip, tsc_approx_ref, cyc_cnt_ref);
+      xed_async_reset(ip, tsc_approx_ref, cyc_cnt_ref, __FILE__, __LINE__);
       xed_update_last_inst(ip);
       xed_process_branches(0u, 0u, 0llu, tsc_approx_ref, cyc_cnt_ref);
     } else if (pkt_type == INTEL_PT_PKT_TIP) {
@@ -802,7 +802,7 @@ decode_again:
 
       record_intel_pt_pkt(INTEL_PT_PKT_OVF, 0llu, cyc_cnt_ref, x, n);
       xed_intel_pt_ovf(tsc_approx_ref, cyc_cnt_ref);
-      xed_async_reset(0llu, tsc_approx_ref, cyc_cnt_ref);
+      xed_async_reset(0llu, tsc_approx_ref, cyc_cnt_ref, __FILE__, __LINE__);
 #if defined(EN_PTRACE_UNWIND)
       drop_unwinds(last_tsc_pge, tsc_approx_ref);
 #endif
@@ -924,9 +924,6 @@ decode_again:
 
       record_intel_pt_pkt(INTEL_PT_PKT_PIP, pgd, cyc_cnt_ref, x, n);
       xed_intel_pt_pip(pgd, tsc_approx_ref, cyc_cnt_ref);
-      if ((pgd != 0llu) && (pgd != ((unsigned long long int) (perfed_pgd)))) {
-        xed_async_reset(0llu, tsc_approx_ref, cyc_cnt_ref);
-      }
       x += 8llu;
       n -= 8llu;
       goto decode_again;

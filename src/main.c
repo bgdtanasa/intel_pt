@@ -863,7 +863,7 @@ static void sig_action_SIGRT(int sig_no, siginfo_t* sig_info, void* u_ctx) {
   } else if (sig_no == SIGRTMIN + 1) {
     fprintf(stdout, "SIG = %s\n", "New possible stack");
 
-    no_new_a_maps++;
+    redo_kmaps++;
   } else if (sig_no == SIGRTMAX) {
     fprintf(stdout, "SIG = %s\n", "New mapping");
   } else {

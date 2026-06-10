@@ -199,7 +199,9 @@ extern void xed_process_branches(const unsigned int           tnt,
 
 extern void xed_async_reset(const unsigned long long int tip,
                             const double                 tsc,
-                            const unsigned long long int cyc_cnt);
+                            const unsigned long long int cyc_cnt,
+                            const char* const            file,
+                            const unsigned int           line);
 extern void xed_async_enter(const unsigned long long int tip,
                             const double                 tsc,
                             const unsigned long long int cyc_cnt);
@@ -214,6 +216,6 @@ extern void                  xed_unwind_link_inst_to_dwarf(void);
 
 extern void xed_close(void);
 
-extern unsigned int xed_is_enabled(void);
+extern unsigned int xed_is_enabled(const unsigned long long int addr);
 
 #endif

@@ -13,7 +13,7 @@
 unsigned long         perfed_pgd;
 kmaps_t               kmaps;
 unsigned long         no_kmaps;
-volatile unsigned int no_new_a_maps;
+volatile sig_atomic_t redo_kmaps;
 unsigned long         mod_text_addr;
 unsigned long         mod_text_len;
 
@@ -61,7 +61,6 @@ void perfed_kmod(const int perfed_pid) {
       fprintf(stdout, "perfed_pgd    = %16lx\n", perfed_pgd);
       fprintf(stdout, "my_char_fd    = %16d\n", my_char_fd);
       fprintf(stdout, "no_kmaps      = %16lu\n", no_kmaps);
-      fprintf(stdout, "no_new_a_maps = %16u\n", no_new_a_maps);
       fprintf(stdout, "mod_text_addr = %16lx\n", mod_text_addr);
       fprintf(stdout, "mod_text_len  = %16lu\n", mod_text_len);
       fprintf(stdout, "====== KMOD ======\n");
@@ -126,13 +125,10 @@ unsigned long long int kmod_find_addr(const unsigned long long int addr) {
 }
 
 void kmod_redo_kmaps(void) {
-  if (no_new_a_maps >= 1u) {
+  if (redo_kmaps >= 1) {
     write(my_char_fd, "X\n", sizeof("X\n"));
 
-    fprintf(stdout,
-            "no_kmaps = %lu no_new_a_maps = %2u\n",
-            no_kmaps,
-            no_new_a_maps);
-    no_new_a_maps = 0u;
+    fprintf(stdout, "no_kmaps      = %16lu\n", no_kmaps);
+    redo_kmaps = 0;
   }
 }

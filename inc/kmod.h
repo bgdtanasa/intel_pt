@@ -1,6 +1,8 @@
 #ifndef _KMOD_
 #define _KMOD_
 
+#include <signal.h>
+
 #define MAX_NO_KMAPS (512u)
 
 typedef struct __attribute__ ((__packed__)) {
@@ -15,7 +17,7 @@ typedef kmap_t kmaps_t[ MAX_NO_KMAPS ];
 extern unsigned long         perfed_pgd;
 extern kmaps_t               kmaps;
 extern unsigned long         no_kmaps;
-extern volatile unsigned int no_new_a_maps;
+extern volatile sig_atomic_t redo_kmaps;
 extern unsigned long         mod_text_addr;
 extern unsigned long         mod_text_len;
 

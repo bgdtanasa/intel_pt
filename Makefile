@@ -1,3 +1,7 @@
+
+GREEN=$(shell printf '\033[32m')
+RESET=$(shell printf '\033[0m')
+
 SRC_DIR=src
 SOURCES=
 SOURCES+=$(SRC_DIR)/kmod.c
@@ -26,12 +30,13 @@ CPP_FLAGS=
 CPP_FLAGS+=-DEN_MTC
 CPP_FLAGS+=-DEN_RET_COMPRESSION
 CPP_FLAGS+=-DEN_VMLINUX
-#CPP_FLAGS+=-DEN_VMLINUX_WIDE
+CPP_FLAGS+=-DEN_VMLINUX_WIDE
 #CPP_FLAGS+=-DEN_PMU
-#CPP_FLAGS+=-DEN_PTRACE_UNWIND
+CPP_FLAGS+=-DEN_PTRACE_UNWIND
 #CPP_FLAGS+=-DEN_PTRACE_BRK
 CPP_FLAGS+=-DVM_US=0x00007FFFFFFFFFFFllu
 
+$(info $(GREEN))
 ifneq ($(filter -DEN_PMU, $(CPP_FLAGS)), )
 SOURCES+=$(SRC_DIR)/pmu.c
 endif
@@ -51,6 +56,11 @@ ifneq ($(filter -DEN_VMLINUX_WIDE, $(CPP_FLAGS)), )
 $(error -DEN_VMLINUX is not set in CPP_FLAGS)
 endif
 endif
+
+ifneq ($(filter -DEN_RET_COMPRESSION, $(CPP_FLAGS)), )
+$(info -DEN_RET_COMPRESSION is set in CPP_FLAGS)
+endif
+$(info $(RESET))
 
 CFLAGS=$(INC_FLAGS) $(CPP_FLAGS) -flto -Wno-unused-result -m64 -mavx -pedantic -Wall -Wextra -O3 -ggdb -std=gnu99 -D_GNU_SOURCE -MMD -MP
 #CFLAGS+=-fsanitize=leak

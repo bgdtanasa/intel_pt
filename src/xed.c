@@ -86,13 +86,6 @@ typedef struct {
   unsigned long long int t_cycs;
 } inst_stats_t;
 
-#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-typedef enum {
-  XED_STATUS_DISABLE = 0,
-  XED_STATUS_ENABLE,
-} xed_status_t;
-#endif
-
 #if defined(EN_PTRACE_UNWIND)
 dwarf_unwind_t*    dwarf_unwinds;
 unsigned long long no_dwarf_unwinds;
@@ -125,11 +118,7 @@ static ctx_t        ctx[ MAX_NO_CTXS ] = {
 };
 static ctx_t*       this_ctx           = &ctx[ 0u ];
 static unsigned int ctx_idx            = 0u;
-
-static unsigned long long int this_pgd   = 0llu;
-#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-static xed_status_t           xed_status = XED_STATUS_DISABLE;
-#endif
+static unsigned long long int this_pgd = 0llu;
 
 static FILE*                  branches_fp;
 static unsigned long long int branches_n;
@@ -279,6 +268,14 @@ static void add_inst(xed_decoded_inst_t* const    xedd,
   install_brk(&insts[ no_insts ]);
 #endif
   no_insts++;
+}
+
+static void print_call_stack(void) {
+  fprintf(stdout, "Call Stack - Begin\n");
+  for (unsigned int i = 0u; i < this_ctx->call_stack_idx; i++) {
+    fprintf(stdout, "%16llx %16llx\n", this_ctx->call_stack[ i ].call->addr, this_ctx->call_stack[ i ].ret->addr);
+  }
+  fprintf(stdout, "Call Stack - End\n");
 }
 
 static inline __attribute__((always_inline)) void reset_call_stack(void) {
@@ -712,43 +709,24 @@ void perfed_xed(const int perfed_pid __attribute__((unused))) {
 
 void xed_intel_pt_ovf(const double                 tsc,
                       const unsigned long long int cyc_cnt) {
+  fprintf(branches_fp, "Pid Reset %16llx :: %20.2lf %20llu\n", this_pgd, tsc, cyc_cnt);
   this_pgd = 0llu;
-
-#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-  fprintf(branches_fp, "Pid Reset %16llx :: %20.2lf %20llu\n", 0llu, tsc, cyc_cnt);
-
-  xed_status = XED_STATUS_DISABLE;
-#endif
 
   fprintf(branches_fp, "O :: %20.2lf %20llu\n", tsc, cyc_cnt);
 }
 
-extern void xed_intel_pt_pip(const unsigned long long int pgd,
-                             const double                 tsc,
-                             const unsigned long long int cyc_cnt) {
-  this_pgd = pgd;
-
-  if (pgd == ((unsigned long long int) (perfed_pgd))) {
-#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-    if (xed_status != XED_STATUS_ENABLE) {
-      fprintf(branches_fp, "Pid Enter %16llx :: %20.2lf %20llu\n", pgd, tsc, cyc_cnt);
-
-      xed_status = XED_STATUS_ENABLE;
-    }
-#else
-    fprintf(branches_fp, "Pid Enter :: %20.2lf %20llu\n", tsc, cyc_cnt);
-#endif
+void xed_intel_pt_pip(const unsigned long long int pgd,
+                      const double                 tsc,
+                      const unsigned long long int cyc_cnt) {
+  if (this_pgd == pgd) {
+    fprintf(branches_fp, "Pid Continue %16llx :: %20.2lf %20llu\n", pgd, tsc, cyc_cnt);
   } else {
-#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-    if (xed_status != XED_STATUS_DISABLE) {
-      fprintf(branches_fp, "Pid  Exit %16llx :: %20.2lf %20llu\n", pgd, tsc, cyc_cnt);
-
-      xed_status = XED_STATUS_DISABLE;
+    if (this_pgd != 0llu) {
+      fprintf(branches_fp, "Pid Exit  %16llx :: %20.2lf %20llu\n", this_pgd, tsc, cyc_cnt);
     }
-#else
-    fprintf(branches_fp, "Pid  Exit :: %20.2lf %20llu\n", tsc, cyc_cnt);
-#endif
+    fprintf(branches_fp, "Pid Enter %16llx :: %20.2lf %20llu\n", pgd, tsc, cyc_cnt);
   }
+  this_pgd = pgd;
 }
 
 void xed_intel_pt_tsc(const double                 tsc,
@@ -972,13 +950,13 @@ void xed_ptrace_uregs(const double                         tsc,
 #endif
 
 void xed_update_last_inst(const unsigned long long addr) {
+  const inst_t* const inst = xed_unwind_find_inst(addr);
+
 #if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-  if ((xed_status == XED_STATUS_DISABLE) && (addr <= VM_US)) {
+  if ((this_pgd != ((unsigned long long int) (perfed_pgd))) && (addr <= VM_US)) {
     this_ctx->last_inst = -1ll; return;
   }
 #endif
-
-  const inst_t* const inst = xed_unwind_find_inst(addr);
 
   if (inst != NULL) {
     this_ctx->last_inst = ((signed long long) (inst - &insts[ 0u ]));
@@ -1009,13 +987,19 @@ void xed_process_branches(const unsigned int           tnt,
 #endif
 
   if (this_ctx->last_inst == -1ll) {
-    return;
-  }
 #if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-  if ((xed_status == XED_STATUS_DISABLE) && (insts[ this_ctx->last_inst ].addr <= VM_US)) {
+    if ((tip >= VMLINUX_STEXT) || (this_pgd == ((unsigned long long int) (perfed_pgd)))) {
+      if (tip != 0llu) {
+        xed_update_last_inst(tip);
+        xed_process_branches(tnt, tnt_len, 0llu, tsc, cyc_cnt);
+      } else if (tnt_len >= 1u) {
+        fprintf(branches_fp, "TNT %8x %u :: %20.2lf %20llu\n", tnt, tnt_len, tsc, cyc_cnt);
+        fprintf(branches_fp, "TIP %16llx :: %20.2lf %20llu\n", tip, tsc, cyc_cnt);
+      }
+    }
+#endif
     return;
   }
-#endif
 
   tnt_t*       x_tnt = NULL;
   const tip_t* x_tip = NULL;
@@ -1212,10 +1196,14 @@ void xed_process_branches(const unsigned int           tnt,
                 }
                 continue;
               } else {
-                xed_close(); fprintf(stderr, "0 RET TNT :: %16llx\n", insts[ this_ctx->last_inst ].addr); for (;;) {}
+                //xed_close();
+                print_call_stack(); fflush(branches_fp); fclose(branches_fp);
+                fprintf(stderr, "0 RET TNT :: %16llx\n", insts[ this_ctx->last_inst ].addr); for (;;) {}
               }
             } else {
-              xed_close(); fprintf(stderr, "1 RET TNT :: %16llx\n", insts[ this_ctx->last_inst ].addr); for (;;) {}
+              //xed_close();
+              print_call_stack(); fflush(branches_fp); fclose(branches_fp);
+              fprintf(stderr, "1 RET TNT :: %16llx\n", insts[ this_ctx->last_inst ].addr); for (;;) {}
             }
           }
         }
@@ -1338,10 +1326,19 @@ void xed_process_branches(const unsigned int           tnt,
             if (this_ctx->tip_queue_head != this_ctx->tip_queue_tail) {
               fflush(branches_fp); fprintf(stderr, "TIP Queue TIP_PGD\n"); for (;;) {}
             }
-            if (ctx_idx >= 1u) {
-              ctx_idx--;
+
+            if (this_ctx->last_inst == -1ll) {
+              xed_async_reset(x_tip->tip, x_tip->tsc, x_tip->cyc_cnt, __FILE__, __LINE__);
+            } else {
+              if (ctx_idx >= 1u) {
+                ctx_idx--;
+              }
+              this_ctx = &ctx[ ctx_idx ];
             }
-            this_ctx = &ctx[ ctx_idx ];
+            if ((this_ctx->last_inst != -1ll) && (x_tip->tip != insts[ this_ctx->last_inst ].addr)) {
+              fprintf(branches_fp, "Async Adjust :: %20.2lf %16llx %16llx\n", x_tip->tsc, x_tip->tip, insts[ this_ctx->last_inst ].addr);
+              xed_update_last_inst(x_tip->tip);
+            }
           }
         } else {
           return;
@@ -1355,7 +1352,9 @@ void xed_process_branches(const unsigned int           tnt,
 
 void xed_async_reset(const unsigned long long int tip,
                      const double                 tsc,
-                     const unsigned long long int cyc_cnt) {
+                     const unsigned long long int cyc_cnt,
+                     const char* const            file,
+                     const unsigned int           line) {
   reset_inst_stats(cyc_cnt);
 
   for (unsigned int i = 0u; i <= ctx_idx; i++) {
@@ -1363,7 +1362,7 @@ void xed_async_reset(const unsigned long long int tip,
     reset_call_stack();
     reset_last_inst();
   }
-  fprintf(branches_fp, "Async Reset :: %20.2lf %16llx\n", tsc, tip);
+  fprintf(branches_fp, "Async Reset :: %20.2lf %16llx :: %s %u\n", tsc, tip, file, line);
   ctx_idx  = 0u;
   this_ctx = &ctx[ ctx_idx ];
 }
@@ -1524,10 +1523,12 @@ void xed_close(void) {
   }
 }
 
-unsigned int xed_is_enabled(void) {
+unsigned int xed_is_enabled(const unsigned long long int addr) {
 #if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-  return (xed_status == XED_STATUS_ENABLE) ? (1u) : (0u);
+  return ((this_pgd == ((unsigned long long int) (perfed_pgd))) || (addr >= VMLINUX_STEXT)) ? (1u) : (0u);
 #else
+  (void) (addr);
+
   return 1u;
 #endif
 }

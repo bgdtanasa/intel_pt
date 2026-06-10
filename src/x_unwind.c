@@ -153,7 +153,7 @@ unsigned int drop_unwinds(const double a, const double b) {
 
     if ((a <= attach_tsc) && (attach_tsc <= b)) {
       n++;
-      fprintf(stdout, "Dropping unwind at %20.2lf %20.2lf %20.2lf\n", a, attach_tsc, b);
+      fprintf(stdout, "Dropping unwind at %20.2lf %20.2lf %20.2lf :: %6u %6u\n", a, attach_tsc, b, unwind_queue_tail, unwind_queue_head);
 
       memset(unwind_insts, 0, sizeof(unwind_insts_t));
       unwind_queue_tail = (unwind_queue_tail + 1u) % UNWIND_QUEUE_LEN;
@@ -173,8 +173,11 @@ unsigned int drop_unwinds(const double a, const double b) {
 
 void print_unwind(FILE* const fp) {
   unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
+  const double          attach_tsc   = ((double) (unwind_insts->attach_tsc));
 
   if (unwind_insts->no_insts >= 1u) {
+    fprintf(stdout, "Printing unwind at %20.2lf %20.2lf %20.2lf :: %6u %6u\n", 0.0, attach_tsc, 0.0, unwind_queue_tail, unwind_queue_head);
+
     fprintf(fp, "AT :: %20.2lf\n", ((double) (unwind_insts->attach_tsc)));
 
     fprintf(fp,
