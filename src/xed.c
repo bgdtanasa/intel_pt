@@ -94,6 +94,7 @@ char               binaries[ MAX_NO_BINARIES ][ MAX_BINARY_LENGTH ];
 unsigned int       no_binaries;
 inst_t*            insts;
 unsigned long long no_insts;
+unsigned long long no_insts_vmlinux;
 
 sw_util_t    sw_util_queue[ SW_UTIL_QUEUE_LEN ];
 unsigned int sw_util_queue_head;
@@ -135,7 +136,89 @@ extern double tsc_hz_ns;
 extern double tsc_factor;
 extern double cbr_factor;
 
-static void add_inst(xed_decoded_inst_t* const    xedd,
+#if defined(EN_VMLINUX)
+static inline __attribute__((always_inline)) void reparse_vmlinux(const unsigned long long old_addr,
+                                                                  const unsigned long long new_addr) {
+  unsigned int reparse = 0u;
+
+  if (new_addr >= vm_kernel_ks) {
+    for (unsigned long i = 0lu; i < no_mods; i++) {
+      if ((mods[ i ].addr <= new_addr) && (new_addr < mods[ i ].addr + mods[ i ].sz)) {
+        const xed_uint8_t* const inst_bytes = ((xed_uint8_t*) (mods[ i ].perfing_addr + new_addr - mods[ i ].addr));
+        const inst_t* const      inst       = xed_unwind_find_inst(new_addr);
+
+        if (inst != NULL) {
+          for (xed_uint_t j = 0u; j < inst->length; j++) {
+            if (inst_bytes[ j ] != inst->inst_bytes[ j ]) {
+              reparse = 1u;
+              break;
+            }
+          }
+        } else {
+          reparse = 1u;
+        }
+        break;
+      }
+    }
+  }
+
+  if (reparse == 1u) {
+    fprintf(stdout, "reparse_vmlinux :: %16llx -> %16llx\n", old_addr, new_addr);
+
+    memset(&insts[ no_insts_vmlinux ], 0, (MAX_NO_INSTS - no_insts_vmlinux) * sizeof(insts[ 0llu ]));
+    no_insts         = no_insts_vmlinux;
+    no_insts_vmlinux = 0llu;
+
+    parse_vmlinux();
+  }
+}
+#endif
+
+static inline __attribute__((always_inline)) void add_tnt(const unsigned int           tnt,
+                                                          const unsigned int           tnt_len,
+                                                          const double                 tsc,
+                                                          const unsigned long long int cyc_cnt) {
+  if (tnt_len >= 1u) {
+    const unsigned int tnt_queue_head_next = (this_ctx->tnt_queue_head + 1u) % TNT_QUEUE_LEN;
+
+    if (tnt_queue_head_next != this_ctx->tnt_queue_tail) {
+      this_ctx->tnt_queue[ this_ctx->tnt_queue_head ] = (tnt_t) {
+        .tnt     = tnt,
+        .tnt_len = tnt_len,
+        .tsc     = tsc,
+        .cyc_cnt = cyc_cnt
+      };
+      this_ctx->tnt_queue_head                        = tnt_queue_head_next;
+    } else {
+      fflush(branches_fp); fprintf(stderr, "BR Queue full!\n"); for (;;) {}
+    }
+  }
+}
+
+static inline __attribute__((always_inline)) void add_tip(const unsigned long long int tip,
+                                                          const double                 tsc,
+                                                          const unsigned long long int cyc_cnt) {
+  if (tip != 0llu) {
+    if (tip > insts[ no_insts - 1llu ].addr) {
+      fflush(branches_fp); fprintf(stderr, "TIP out of bounds :: %16llx!\n", tip); for (;;) {}
+    }
+    const unsigned int tip_queue_head_next = (this_ctx->tip_queue_head + 1u) % TIP_QUEUE_LEN;
+
+    if (tip_queue_head_next != this_ctx->tip_queue_tail) {
+      this_ctx->tip_queue[ this_ctx->tip_queue_head ] = (tip_t) {
+        .tip     = tip,
+        .tsc     = tsc,
+        .cyc_cnt = cyc_cnt
+      };
+      this_ctx->tip_queue_head                        = tip_queue_head_next;
+    } else {
+      fflush(branches_fp); fprintf(stderr, "TIP Queue full!\n"); for (;;) {}
+    }
+  }
+}
+
+static void add_inst(const unsigned char* const   inst_bytes,
+                     xed_decoded_inst_t* const    xedd,
                      const char* const            binary,
                      const unsigned long long int base_addr,
                      const unsigned long long int addr) {
@@ -155,10 +238,8 @@ static void add_inst(xed_decoded_inst_t* const    xedd,
   insts[ no_insts ].addr      = addr;
   insts[ no_insts ].category  = xedd_category;
   insts[ no_insts ].iclass    = xedd_iclass;
-#if defined(PRINT_XED_OPCODE)
-  memcpy(&insts[ no_insts ].bytes[ 0u ], &inst_bytes[ 0u ], n_bytes);
-#endif
   insts[ no_insts ].length    = xedd_length;
+  memcpy(&insts[ no_insts ].inst_bytes[ 0u ], inst_bytes, xedd_length);
 
   if (xed_inst_get_attribute(xedd_dec, XED_ATTRIBUTE_FAR_XFER) == 1u) {
     insts[ no_insts ].cofi.type |= FAR_TRANSFER;
@@ -241,19 +322,21 @@ static void add_inst(xed_decoded_inst_t* const    xedd,
         (xedd_iclass == XED_ICLASS_IRETQ) ||
         (xedd_iclass == XED_ICLASS_RET_FAR)) {
       insts[ no_insts ].cofi.type |= FAR_TRANSFER;
-    } else {
+    } else if (xedd_iclass == XED_ICLASS_RET_NEAR) {
       insts[ no_insts ].cofi.type |= INDIRECT_BRANCH;
+    } else {
+      fprintf(stderr, "Invalid COFI %u\n", insts[ no_insts ].cofi.type); for (;;) {}
     }
   } else if ((xedd_category == XED_CATEGORY_INTERRUPT) ||
-              (xedd_category == XED_CATEGORY_SYSCALL)   ||
-              (xedd_category == XED_CATEGORY_SYSRET)    ||
-              (xedd_iclass == XED_ICLASS_INT1)          ||
-              (xedd_iclass == XED_ICLASS_INT3)          ||
-              (xedd_iclass == XED_ICLASS_INTO)          ||
-              (xedd_iclass == XED_ICLASS_SYSENTER)      ||
-              (xedd_iclass == XED_ICLASS_SYSEXIT)       ||
-              (xedd_iclass == XED_ICLASS_VMLAUNCH)      ||
-              (xedd_iclass == XED_ICLASS_VMRESUME)) {
+             (xedd_category == XED_CATEGORY_SYSCALL)   ||
+             (xedd_category == XED_CATEGORY_SYSRET)    ||
+             (xedd_iclass == XED_ICLASS_INT1)          ||
+             (xedd_iclass == XED_ICLASS_INT3)          ||
+             (xedd_iclass == XED_ICLASS_INTO)          ||
+             (xedd_iclass == XED_ICLASS_SYSENTER)      ||
+             (xedd_iclass == XED_ICLASS_SYSEXIT)       ||
+             (xedd_iclass == XED_ICLASS_VMLAUNCH)      ||
+             (xedd_iclass == XED_ICLASS_VMRESUME)) {
     insts[ no_insts ].cofi.type |= FAR_TRANSFER;
   }
 
@@ -271,7 +354,7 @@ static void add_inst(xed_decoded_inst_t* const    xedd,
 }
 
 static void print_call_stack(void) {
-  fprintf(stdout, "Call Stack - Begin\n");
+  fprintf(stdout, "Call Stack - Begin :: %3u\n", this_ctx->call_stack_idx);
   for (unsigned int i = 0u; i < this_ctx->call_stack_idx; i++) {
     fprintf(stdout, "%16llx %16llx\n", this_ctx->call_stack[ i ].call->addr, this_ctx->call_stack[ i ].ret->addr);
   }
@@ -584,7 +667,7 @@ xed_decode_inst:
                                  0,
                                  NULL,
                                  NULL)) {
-            add_inst(&xedd, xed_file, base_addr, addr);
+            add_inst(&inst_bytes[ 0u ], &xedd, xed_file, base_addr, addr);
           }
         } else if (xed_error == XED_ERROR_BUFFER_TOO_SHORT) {
           goto xed_decode_inst;
@@ -619,64 +702,57 @@ xed_decode_inst:
 
 #if defined(EN_VMLINUX)
 void parse_vmlinux(void) {
-  typedef struct {
-    char* const            binary;
-    unsigned long long int addr;
-  } vmlinux_phdr_t;
-
-  const vmlinux_phdr_t vmlinux_phdrs[ ] = {
-    [ 0u ] = {
-      .binary = "vmlinux_raw",
-      .addr   = VMLINUX_STEXT
-    },
-    [ 1u ] = {
-      .binary = "vmlinux_modules",
-      .addr   = VMLINUX_MTEXT
-    }
-  };
-
   fprintf(stdout, "====== KERNEL ======\n");
-  for (unsigned int i = 0u; i < ((unsigned int) (sizeof(vmlinux_phdrs) / sizeof(vmlinux_phdrs[ 0u ]))); i++) {
-    unsigned long long int buffer_len = 0llu;
-    unsigned char* const   buffer     = get_phdr_buffer("/proc/kcore", vmlinux_phdrs[ i ].addr, &buffer_len);
+  no_insts_vmlinux = no_insts;
+  for (unsigned long i = 0lu; i < no_mods; i++) {
+    unsigned char* inst_buffer     = ((unsigned char*) (mods[ i ].perfing_addr));
+    unsigned int   inst_buffer_len = ((unsigned int) (mods[ i ].sz));
+    unsigned char* inst_bytes      = inst_buffer;
 
-    if (buffer != NULL) {
-      unsigned char*     inst_bytes = buffer;
-      xed_decoded_inst_t xedd;
-      xed_error_enum_t   xed_error;
+    xed_decoded_inst_t xedd;
+    xed_error_enum_t   xed_error;
 
-      for (;;) {
-        xed_decoded_inst_zero(&xedd);
-        xed_decoded_inst_set_mode(&xedd, XED_MACHINE_MODE_LONG_64, XED_ADDRESS_WIDTH_64b);
-        xed_error = xed_decode_with_features(&xedd, inst_bytes, XED_MAX_INSTRUCTION_BYTES, &chip_features);
-        if (xed_error == XED_ERROR_NONE) {
-          add_inst(&xedd, vmlinux_phdrs[ i ].binary, vmlinux_phdrs[ i ].addr, vmlinux_phdrs[ i ].addr + ((unsigned long long int) (inst_bytes - buffer)));
+    fprintf(stdout,
+            "%32s :: %16lx %16lx %8lu :: no_binaries = %9u no_insts = %9llu\n",
+            &mods[ i ].name[ 0u ],
+            mods[ i ].addr,
+            mods[ i ].perfing_addr,
+            mods[ i ].sz,
+            no_binaries,
+            no_insts);
 
-          inst_bytes += xed_decoded_inst_get_length(&xedd);
-        } else {
-          inst_bytes += 1;
-        }
+    for (;;) {
+      unsigned int xed_max_inst_bytes = ((unsigned int) (&inst_buffer[ inst_buffer_len ] - inst_bytes));
 
-        if (inst_bytes >= &buffer[ buffer_len ]) {
-          break;
-        }
-        if (no_insts >= MAX_NO_INSTS) {
-          break;
-        }
+      if (xed_max_inst_bytes >= XED_MAX_INSTRUCTION_BYTES) {
+        xed_max_inst_bytes = XED_MAX_INSTRUCTION_BYTES;
       }
-      free(buffer);
 
-      fprintf(stdout,
-              "%48s %16llx %16llx :: no_insts = %9llu no_binaries = %9u\n",
-              vmlinux_phdrs[ i ].binary,
-              vmlinux_phdrs[ i ].addr,
-              vmlinux_phdrs[ i ].addr + buffer_len,
-              no_insts,
-              no_binaries);
+      xed_decoded_inst_zero(&xedd);
+      xed_decoded_inst_set_mode(&xedd, XED_MACHINE_MODE_LONG_64, XED_ADDRESS_WIDTH_64b);
+      xed_error = xed_decode_with_features(&xedd, inst_bytes, xed_max_inst_bytes, &chip_features);
+      if (xed_error == XED_ERROR_NONE) {
+        add_inst(inst_bytes, &xedd, mods[ i ].name, mods[ i ].addr, mods[ i ].addr + ((unsigned long long int) (inst_bytes - inst_buffer)));
+
+        inst_bytes += xed_decoded_inst_get_length(&xedd);
+      } else {
+        inst_bytes += 1;
+      }
+
+      if (inst_bytes >= &inst_buffer[ inst_buffer_len ]) {
+        break;
+      }
+      if (no_insts >= MAX_NO_INSTS) {
+        break;
+      }
+    }
+    if (no_insts >= MAX_NO_INSTS) {
+      break;
     }
   }
-  proc_update_modules();
   fprintf(stdout, "====== KERNEL ======\n");
+  fprintf(stdout, "no_insts_vmlinux = %9llu\n", no_insts_vmlinux);
+  fprintf(stdout, "no_insts         = %9llu\n", no_insts);
 }
 #endif
 
@@ -719,7 +795,7 @@ void xed_intel_pt_pip(const unsigned long long int pgd,
                       const double                 tsc,
                       const unsigned long long int cyc_cnt) {
   if (this_pgd == pgd) {
-    fprintf(branches_fp, "Pid Continue %16llx :: %20.2lf %20llu\n", pgd, tsc, cyc_cnt);
+    fprintf(branches_fp, "Pid Cont  %16llx :: %20.2lf %20llu\n", pgd, tsc, cyc_cnt);
   } else {
     if (this_pgd != 0llu) {
       fprintf(branches_fp, "Pid Exit  %16llx :: %20.2lf %20llu\n", this_pgd, tsc, cyc_cnt);
@@ -953,7 +1029,7 @@ void xed_update_last_inst(const unsigned long long addr) {
   const inst_t* const inst = xed_unwind_find_inst(addr);
 
 #if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-  if ((this_pgd != ((unsigned long long int) (perfed_pgd))) && (addr <= VM_US)) {
+  if ((this_pgd != ((unsigned long long int) (perfed_pgd))) && (addr <= vm_us)) {
     this_ctx->last_inst = -1ll; return;
   }
 #endif
@@ -963,17 +1039,28 @@ void xed_update_last_inst(const unsigned long long addr) {
   } else {
     this_ctx->last_inst = -1ll;
 
+#if defined(EN_VMLINUX)
+    if ((vm_kernel_ks <= addr) && (addr < vm_kernel_me)) {
+      for (unsigned long i = 0lu; i < no_mods; i++) {
+        const unsigned long long int a = ((unsigned long long int) (mods[ i ].addr));
+        const unsigned long long int b = a + ((unsigned long long int) (mods[ i ].sz));
+
+        if ((a <= addr) && (addr < b)) {
+          fprintf(stdout, "XED Instruction %16llx found in module %s range %16llx - %16llx\n", addr, mods[ i ].name, a, b); for (;;) {}
+          return;
+        }
+      }
+    }
+#endif
+
     for (unsigned int i = 0u; i < no_amaps; i++) {
       if ((amaps[ i ].a <= addr) && (addr < amaps[ i ].b)) {
-        fprintf(stdout,
-                "XED Instruction %16llx found in anonymous mapping %16llx %16llx\n",
-                addr,
-                amaps[ i ].a,
-                amaps[ i ].b);
+        fprintf(stdout, "XED Instruction %16llx found in anonymous mapping %16llx %16llx\n", addr, amaps[ i ].a, amaps[ i ].b);
         return;
       }
     }
-    xed_close(); fprintf(stderr, "XED Instruction %16llx not found\n", addr); for (;;) {}
+
+    fprintf(stderr, "XED Instruction %16llx not found\n", addr); for (;;) {}
   }
 }
 
@@ -987,55 +1074,14 @@ void xed_process_branches(const unsigned int           tnt,
 #endif
 
   if (this_ctx->last_inst == -1ll) {
-#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-    if ((tip >= VMLINUX_STEXT) || (this_pgd == ((unsigned long long int) (perfed_pgd)))) {
-      if (tip != 0llu) {
-        xed_update_last_inst(tip);
-        xed_process_branches(tnt, tnt_len, 0llu, tsc, cyc_cnt);
-      } else if (tnt_len >= 1u) {
-        fprintf(branches_fp, "TNT %8x %u :: %20.2lf %20llu\n", tnt, tnt_len, tsc, cyc_cnt);
-        fprintf(branches_fp, "TIP %16llx :: %20.2lf %20llu\n", tip, tsc, cyc_cnt);
-      }
-    }
-#endif
     return;
   }
 
   tnt_t*       x_tnt = NULL;
   const tip_t* x_tip = NULL;
 
-  if (tnt_len >= 1u) {
-    const unsigned int tnt_queue_head_next = (this_ctx->tnt_queue_head + 1u) % TNT_QUEUE_LEN;
-
-    if (tnt_queue_head_next != this_ctx->tnt_queue_tail) {
-      this_ctx->tnt_queue[ this_ctx->tnt_queue_head ] = (tnt_t) {
-        .tnt     = tnt,
-        .tnt_len = tnt_len,
-        .tsc     = tsc,
-        .cyc_cnt = cyc_cnt
-      };
-      this_ctx->tnt_queue_head                        = tnt_queue_head_next;
-    } else {
-      fflush(branches_fp); fprintf(stderr, "BR Queue full!\n"); for (;;) {}
-    }
-  }
-  if (tip != 0llu) {
-    if (tip > insts[ no_insts - 1llu ].addr) {
-      fflush(branches_fp); fprintf(stderr, "TIP out of bounds :: %16llx!\n", tip); for (;;) {}
-    }
-    const unsigned int tip_queue_head_next = (this_ctx->tip_queue_head + 1u) % TIP_QUEUE_LEN;
-
-    if (tip_queue_head_next != this_ctx->tip_queue_tail) {
-      this_ctx->tip_queue[ this_ctx->tip_queue_head ] = (tip_t) {
-        .tip     = tip,
-        .tsc     = tsc,
-        .cyc_cnt = cyc_cnt
-      };
-      this_ctx->tip_queue_head                        = tip_queue_head_next;
-    } else {
-      fflush(branches_fp); fprintf(stderr, "TIP Queue full!\n"); for (;;) {}
-    }
-  }
+  add_tnt(tnt, tnt_len, tsc, cyc_cnt);
+  add_tip(tip, tsc, cyc_cnt);
 
   for (;;) {
     if (this_ctx->last_inst == -1ll) {
@@ -1085,6 +1131,9 @@ void xed_process_branches(const unsigned int           tnt,
       branches_n++;
 #endif
       this_ctx->last_inst++;
+      if (this_ctx->last_inst >= ((signed long long) (no_insts))) {
+        fprintf(stderr, "0 last_inst >= no_insts\n"); for (;;) {}
+      }
 #if defined(PRINT_XED)
       fprintf(branches_fp, "%s -> %16llx _ :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, 0.0);
 #endif
@@ -1124,6 +1173,9 @@ void xed_process_branches(const unsigned int           tnt,
             update_inst_stats(insts[ this_ctx->last_inst ].iclass);
             branches_n++;
             this_ctx->last_inst++;
+            if (this_ctx->last_inst >= ((signed long long) (no_insts))) {
+              fprintf(stderr, "1 last_inst >= no_insts\n"); for (;;) {}
+            }
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
             fprintf(branches_fp, "%s -> %16llx 0 :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, x_tnt->tsc);
 #endif
@@ -1147,7 +1199,7 @@ void xed_process_branches(const unsigned int           tnt,
           };
           this_ctx->call_stack_idx++;
           if (this_ctx->call_stack_idx >= CALL_STACK_LEN) {
-            xed_close(); fprintf(stderr, "Full stack\n"); for (;;) {}
+            fprintf(stderr, "Full stack\n"); for (;;) {}
           }
 
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
@@ -1168,7 +1220,7 @@ void xed_process_branches(const unsigned int           tnt,
         }
       } else if ((insts[ this_ctx->last_inst ].cofi.type & INDIRECT_BRANCH) != 0u) {
 #if defined(EN_RET_COMPRESSION)
-        if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_RET) {
+        if (insts[ this_ctx->last_inst ].iclass == XED_ICLASS_RET_NEAR) {
           if (x_tnt != NULL) {
             const unsigned int br = x_tnt->tnt & (1u << (x_tnt->tnt_len - 1u));
 
@@ -1196,14 +1248,12 @@ void xed_process_branches(const unsigned int           tnt,
                 }
                 continue;
               } else {
-                //xed_close();
                 print_call_stack(); fflush(branches_fp); fclose(branches_fp);
-                fprintf(stderr, "0 RET TNT :: %16llx\n", insts[ this_ctx->last_inst ].addr); for (;;) {}
+                fprintf(stderr, "0 RET TNT :: %16llx :: %llu\n", insts[ this_ctx->last_inst ].addr, no_insts_vmlinux); for (;;) {}
               }
             } else {
-              //xed_close();
               print_call_stack(); fflush(branches_fp); fclose(branches_fp);
-              fprintf(stderr, "1 RET TNT :: %16llx\n", insts[ this_ctx->last_inst ].addr); for (;;) {}
+              fprintf(stderr, "1 RET TNT :: %16llx :: %llu\n", insts[ this_ctx->last_inst ].addr, no_insts_vmlinux); for (;;) {}
             }
           }
         }
@@ -1219,7 +1269,7 @@ void xed_process_branches(const unsigned int           tnt,
             };
             this_ctx->call_stack_idx++;
             if (this_ctx->call_stack_idx >= CALL_STACK_LEN) {
-              xed_close(); fprintf(stderr, "Full stack\n"); for (;;) {}
+              fprintf(stderr, "Full stack\n"); for (;;) {}
             }
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_UNCOND_BR) {
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_RET) {
@@ -1233,7 +1283,7 @@ void xed_process_branches(const unsigned int           tnt,
 
               if (ret != x_tip->tip) {
                 reset_call_stack();
-                //xed_close(); fprintf(stderr, "0 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
+                //fprintf(stderr, "0 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); //for (;;) {}
               } else {
                 const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
                 const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
@@ -1242,7 +1292,6 @@ void xed_process_branches(const unsigned int           tnt,
                   const double tsc_rc = tsc_r - tsc_c;
 
                   if (tsc_rc < 0.0) {
-                    //xed_close();
                     fprintf(stdout, "0 Broken call stack :: Negative call time %20.2lf %20.2lf => %20.2lf\n", tsc_c, tsc_r, tsc_rc); //for (;;) {}
                   }
                 }
@@ -1275,7 +1324,7 @@ void xed_process_branches(const unsigned int           tnt,
             };
             this_ctx->call_stack_idx++;
             if (this_ctx->call_stack_idx >= CALL_STACK_LEN) {
-              xed_close(); fprintf(stderr, "Full stack\n"); for (;;) {}
+              fprintf(stderr, "Full stack\n"); for (;;) {}
             }
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSRET) {
             if (this_ctx->call_stack_idx >= 1u) {
@@ -1288,7 +1337,7 @@ void xed_process_branches(const unsigned int           tnt,
 
               if (ret != x_tip->tip) {
                 reset_call_stack();
-                //xed_close(); fprintf(stderr, "1 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); for (;;) {}
+                //fprintf(stderr, "1 Broken call stack :: Invalid RET %16llx %16llx\n", ret, x_tip->tip); //for (;;) {}
               } else {
                 const double tsc_c = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_c;
                 const double tsc_r = this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r;
@@ -1297,7 +1346,6 @@ void xed_process_branches(const unsigned int           tnt,
                   const double tsc_rc = tsc_r - tsc_c;
 
                   if (tsc_rc < 0.0) {
-                    //xed_close();
                     fprintf(stdout, "1 Broken call stack :: Negative call time %20.2lf %20.2lf => %20.2lf\n", tsc_c, tsc_r, tsc_rc); //for (;;) {}
                   }
                 }
@@ -1316,7 +1364,7 @@ void xed_process_branches(const unsigned int           tnt,
           if ((this_iclass == XED_ICLASS_IRET) || (this_iclass == XED_ICLASS_IRETD) || (this_iclass == XED_ICLASS_IRETQ)) {
             reset_inst_stats(cyc_cnt);
 
-            fprintf(branches_fp, "Async  Exit :: %20.2lf %16llx\n", x_tip->tsc, x_tip->tip);
+            fprintf(branches_fp, "Async   Exit :: %20.2lf %16llx\n", x_tip->tsc, x_tip->tip);
             if (this_ctx->call_stack_idx != 0u) {
               fflush(branches_fp); for (;;) {}
             }
@@ -1336,15 +1384,17 @@ void xed_process_branches(const unsigned int           tnt,
               this_ctx = &ctx[ ctx_idx ];
             }
             if ((this_ctx->last_inst != -1ll) && (x_tip->tip != insts[ this_ctx->last_inst ].addr)) {
-              fprintf(branches_fp, "Async Adjust :: %20.2lf %16llx %16llx\n", x_tip->tsc, x_tip->tip, insts[ this_ctx->last_inst ].addr);
-              xed_update_last_inst(x_tip->tip);
+              //fprintf(branches_fp, "Async Adjust :: %20.2lf %16llx %16llx\n", x_tip->tsc, x_tip->tip, insts[ this_ctx->last_inst ].addr);
+
+              //reparse_vmlinux(insts[ this_ctx->last_inst ].addr, x_tip->tip);
+              //xed_update_last_inst(x_tip->tip);
             }
           }
         } else {
           return;
         }
       } else {
-        xed_close(); fprintf(stderr, "Unknown cofi type\n"); for (;;) {}
+        fprintf(stderr, "Unknown cofi type\n"); for (;;) {}
       }
     }
   }
@@ -1362,7 +1412,7 @@ void xed_async_reset(const unsigned long long int tip,
     reset_call_stack();
     reset_last_inst();
   }
-  fprintf(branches_fp, "Async Reset :: %20.2lf %16llx :: %s %u\n", tsc, tip, file, line);
+  fprintf(branches_fp, "Async  Reset :: %20.2lf %16llx :: %s %u\n", tsc, tip, file, line);
   ctx_idx  = 0u;
   this_ctx = &ctx[ ctx_idx ];
 }
@@ -1380,10 +1430,10 @@ void xed_async_enter(const unsigned long long int tip,
   }
   ctx_idx++;
   if (ctx_idx >= MAX_NO_CTXS) {
-    xed_close(); fprintf(stderr, "Full ctxs\n"); for (;;) {}
+    fprintf(stderr, "Full ctxs\n"); for (;;) {}
   }
   this_ctx = &ctx[ ctx_idx ];
-  fprintf(branches_fp, "Async Enter :: %20.2lf %16llx\n", tsc, tip);
+  fprintf(branches_fp, "Async  Enter :: %20.2lf %16llx\n", tsc, tip);
 }
 
 void xed_tsc_err(const double tsc_err) {
@@ -1401,11 +1451,15 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
     return NULL;
   }
 #if defined(EN_VMLINUX)
-  if ((addr > VM_US) && (addr < VMLINUX_STEXT)) {
-    fprintf(stdout, "XED Instruction %16llx found in range %16llx - %16llx\n", addr, VM_US + 1llu, VMLINUX_STEXT);
+  if ((vm_us <= addr) && (addr < vm_kernel_ks)) {
+    fprintf(stdout, "XED Instruction %16llx found in range %16llx - %16llx\n", addr, vm_us, vm_kernel_ks);
     return NULL;
   }
-  if ((addr >= VMLINUX_STEXT) && (unwind_cache_high[ addr & CACHE_MASK ] != NULL) && (unwind_cache_high[ addr & CACHE_MASK ]->addr == addr)) {
+  if (vm_kernel_me <= addr) {
+    fprintf(stdout, "XED Instruction %16llx found in range %16llx - %16llx\n", addr, vm_kernel_me, 0xFFFFFFFFFFFFFFFFllu);
+    return NULL;
+  }
+  if ((addr >= vm_kernel_ks) && (unwind_cache_high[ addr & CACHE_MASK ] != NULL) && (unwind_cache_high[ addr & CACHE_MASK ]->addr == addr)) {
     return unwind_cache_high[ addr & CACHE_MASK ];
   }
 #endif
@@ -1432,11 +1486,14 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
 
     if ((insts[ m ].addr <= addr) && (addr <= insts[ m ].addr + insts[ m ].length - 1llu)) {
 #if defined(EN_VMLINUX)
-      if (addr >= VMLINUX_STEXT) {
+      if (addr >= vm_kernel_ks) {
         unwind_cache_high[ addr & CACHE_MASK ] = &insts[ m ];
+      } else {
+        unwind_cache_low[ addr & CACHE_MASK ]  = &insts[ m ];
       }
-#endif
+#else
       unwind_cache_low[ addr & CACHE_MASK ] = &insts[ m ];
+#endif
 
       return &insts[ m ];
     } else if (insts[ m ].addr < addr) {
@@ -1445,7 +1502,6 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
       b = m - 1ll;
     }
   }
-
   return NULL;
 }
 
@@ -1525,7 +1581,7 @@ void xed_close(void) {
 
 unsigned int xed_is_enabled(const unsigned long long int addr) {
 #if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-  return ((this_pgd == ((unsigned long long int) (perfed_pgd))) || (addr >= VMLINUX_STEXT)) ? (1u) : (0u);
+  return ((this_pgd == ((unsigned long long int) (perfed_pgd))) || (addr >= vm_kernel_ks)) ? (1u) : (0u);
 #else
   (void) (addr);
 

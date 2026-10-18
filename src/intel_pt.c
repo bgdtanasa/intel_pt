@@ -802,7 +802,6 @@ decode_again:
 
       record_intel_pt_pkt(INTEL_PT_PKT_OVF, 0llu, cyc_cnt_ref, x, n);
       xed_intel_pt_ovf(tsc_approx_ref, cyc_cnt_ref);
-      xed_async_reset(0llu, tsc_approx_ref, cyc_cnt_ref, __FILE__, __LINE__);
 #if defined(EN_PTRACE_UNWIND)
       drop_unwinds(last_tsc_pge, tsc_approx_ref);
 #endif

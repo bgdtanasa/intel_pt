@@ -109,9 +109,7 @@ typedef struct {
   xed_category_enum_t    category;
   xed_iclass_enum_t      iclass;
   xed_uint_t             length;
-#if defined(PRINT_XED_OPCODE)
-  xed_uint8_t            bytes[ XED_MAX_INSTRUCTION_BYTES ];
-#endif
+  xed_uint8_t            inst_bytes[ XED_MAX_INSTRUCTION_BYTES ];
 
   cofi_t                 cofi;
 

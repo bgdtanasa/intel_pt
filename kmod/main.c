@@ -12,12 +12,15 @@
 #include <linux/kprobes.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
+#include <linux/module.h>
+#include <linux/list.h>
 
 #include <linux/sched/signal.h>
 
 #include <uapi/linux/mman.h>
 
 #define MAX_NO_PAGES (500000u)
+#define MAX_NO_MODS  (256u)
 #define MY_DEV_NAME  "my_char"
 
 typedef struct __attribute__ ((__packed__)) {
@@ -27,7 +30,15 @@ typedef struct __attribute__ ((__packed__)) {
   unsigned long perfing_b;
 } kmap_t;
 
-typedef struct page* (*my_follow_page_t)(struct vm_area_struct*, unsigned long, unsigned int);
+typedef struct __attribute__ ((__packed__)) {
+  char          name[ 128u ];
+  unsigned long addr;
+  unsigned long sz;
+
+  unsigned long perfing_addr;
+} mod_t;
+
+//typedef struct page* (*my_follow_page_t)(struct vm_area_struct*, unsigned long, unsigned int);
 
 typedef struct {
   struct page*  page;
@@ -44,14 +55,14 @@ static int           perfed_pid;
 static unsigned long perfed_pgd;
 static unsigned long kmaps;
 static unsigned long no_kmaps;
-static unsigned long mod_text_addr;
-static unsigned long mod_text_len;
-module_param(perfed_pid,    int,   0644);
-module_param(perfed_pgd,    ulong, 0644);
-module_param(kmaps,         ulong, 0644);
-module_param(no_kmaps,      ulong, 0644);
-module_param(mod_text_addr, ulong, 0644);
-module_param(mod_text_len,  ulong, 0644);
+static unsigned long mods;
+static unsigned long no_mods;
+module_param(perfed_pid, int,   0644);
+module_param(perfed_pgd, ulong, 0644);
+module_param(kmaps,      ulong, 0644);
+module_param(no_kmaps,   ulong, 0644);
+module_param(mods,       ulong, 0644);
+module_param(no_mods,    ulong, 0644);
 
 static int    perfing_pid;
 unsigned long perfing_addr_a;
@@ -62,6 +73,9 @@ static void undo_kmaps(void);
 static int  do_kmaps(void);
 static int     my_open(struct inode* inode, struct file* file);
 static ssize_t my_write(struct file* file, const char __user* buf, size_t count, loff_t* offset);
+
+mod_t        my_mods[ MAX_NO_MODS ];
+unsigned int my_no_mods = 0u;
 
 static my_page_t              pages[ MAX_NO_PAGES ];
 static unsigned int           no_pages      = 0u;
@@ -219,7 +233,7 @@ static int do_kmaps(void) {
           }
         }
 
-        printk(KERN_INFO "in_stack = %u %16lx %16lx %16lx", in_stack, vmi_start, perfed_regs->sp, vmi_end);
+        //printk(KERN_INFO "in_stack = %u %16lx %16lx %16lx", in_stack, vmi_start, perfed_regs->sp, vmi_end);
         if (((vmi_start & 0x0000700000000000lu) || (in_stack == 1u)) &&
             ((perfed_vma->vm_flags & VM_READ)      != 0u)            && // r
             ((perfed_vma->vm_flags & VM_WRITE)     != 0u)            && // w
@@ -285,7 +299,7 @@ static int do_kmaps(void) {
         struct vm_area_struct* perfing_vma = NULL;
 
         mmap_write_lock(perfing_mm);
-        perfing_vma = find_vma(perfing_mm, perfing_addr_a);
+        perfing_vma = vma_lookup(perfing_mm, perfing_addr_a);
         if (perfing_vma != NULL) {
           unsigned long no_p = 0u;
 
@@ -343,14 +357,132 @@ static ssize_t my_write(struct file* file, const char __user* buf, size_t count,
 }
 
 static int x_init(void) {
-  (void) copy_to_user((void*) (mod_text_addr), &THIS_MODULE->mem[ MOD_TEXT ].base, sizeof(mod_text_addr));
-  (void) copy_to_user((void*) (mod_text_len),  &THIS_MODULE->mem[ MOD_TEXT ].size, sizeof(mod_text_len));
-
-  my_follow_page_t my_follow_page = (my_follow_page_t) kallsyms_lookup_name("follow_page");
-  if (my_follow_page == NULL) {
-    return -1;
-  }
+  //my_follow_page_t my_follow_page = (my_follow_page_t) kallsyms_lookup_name("follow_page");
+  //if (my_follow_page == NULL) {
+  //  return -1;
+  //}
   perfing_pid = current->pid;
+
+  unsigned long _text = kallsyms_lookup_name("_text");
+  unsigned long _end  = kallsyms_lookup_name("_end");
+  struct mutex*     module_mutex = (struct mutex*) kallsyms_lookup_name("module_mutex");
+  struct list_head* modules      = (struct list_head*) kallsyms_lookup_name("modules");
+  struct module*    mod          = NULL;
+  unsigned long     mods_sz      = 0lu;
+
+  if ((_text != 0lu) && (_end != 0lu) && (_text < _end) && (module_mutex != NULL) && (modules != NULL)) {
+    unsigned int i = 0u;
+
+    printk(KERN_INFO "KMOD :: _text = %016lx", _text);
+    printk(KERN_INFO "KMOD :: _end  = %016lx", _end);
+
+    strcpy(&my_mods[ 0u ].name[ 0u ], "vmlinux_raw");
+    my_mods[ 0u ].addr         = _text;
+    my_mods[ 0u ].sz           = _end - _text;
+    my_mods[ 0u ].perfing_addr = 0lu;
+
+    mods_sz    += my_mods[ 0u ].sz;
+    my_no_mods += 1u;
+
+    mutex_lock(module_mutex);
+    list_for_each_entry(mod, modules, list) {
+      if ((mod->state == MODULE_STATE_LIVE) || (mod->state == MODULE_STATE_COMING)) {
+        const unsigned long a = ((unsigned long) (mod->mem[ MOD_TEXT ].base));
+
+        if (a == 0lu) {
+          continue;
+        }
+
+#if 0
+        if (strstr(&mod->name[ 0u ], "nf_defrag_ipv4") != NULL) {
+          struct mod_kallsyms* mod_kallsyms = mod->kallsyms;
+          if (mod_kallsyms != NULL) {
+            for (unsigned int s = 0u; s < mod_kallsyms->num_symtab; s++) {
+              Elf_Sym* sym = &mod_kallsyms->symtab[ s ];
+
+              if (sym != NULL) {
+                printk(KERN_INFO "KMOD :: %16llx %s", sym->st_value, &mod_kallsyms->strtab[ sym->st_name ]);
+              }
+            }
+          }
+        }
+#endif
+
+        for (i = 1u; i < my_no_mods ; i++) {
+          const unsigned long b = ((unsigned long) (my_mods[ i ].addr));
+
+          if (a < b) {
+            break;
+          }
+        }
+        if (i < my_no_mods) {
+          for (unsigned int j = my_no_mods - 1u; j >= i; j--) {
+            my_mods[ j + 1u ] = my_mods[ j ];
+          }
+        }
+        strcpy(&my_mods[ i ].name[ 0lu ], &mod->name[ 0u ]);
+        my_mods[ i ].addr         = ((unsigned long) (mod->mem[ MOD_TEXT ].base));
+        my_mods[ i ].sz           = ((unsigned long) (mod->mem[ MOD_TEXT ].size));
+        my_mods[ i ].perfing_addr = 0lu;
+
+        mods_sz    += my_mods[ i ].sz;
+        my_no_mods += 1u;
+
+        printk(KERN_INFO "LIVE module [%16lx %8lu %32s] at index %3u",
+               ((unsigned long) (mod->mem[ MOD_TEXT ].base)),
+               ((unsigned long) (mod->mem[ MOD_TEXT ].size)),
+               &mod->name[ 0u ],
+               my_no_mods - 1u);
+      } else {
+        printk(KERN_INFO "NOT LIVE module %s in state %d", &mod->name[ 0u ], mod->state);
+      }
+    }
+    mutex_unlock(module_mutex);
+
+    {
+      struct mm_struct* perfing_mm = get_task_mm(current);
+
+      if (perfing_mm != NULL) {
+        const unsigned long    a_mmap = vm_mmap(NULL, 0lu, mods_sz, PROT_READ, MAP_SHARED | MAP_ANONYMOUS, 0lu);
+        mmap_write_lock(perfing_mm);
+        struct vm_area_struct* a_vma  = vma_lookup(perfing_mm, a_mmap);
+        if (a_vma != NULL) {
+          unsigned long vm_start = a_vma->vm_start;
+
+          for (i = 0u; i < my_no_mods; i++) {
+            my_mods[ i ].perfing_addr = vm_start;
+
+            for (unsigned long j = 0lu; j < my_mods[ i ].sz; j += 4096lu) {
+              void*        pg_addr = ((void*) (my_mods[ i ].addr + j));
+
+              //if (is_vmalloc_or_module_addr(pg_addr) == 0) {
+              //  printk(KERN_INFO "vmalloc_to_page = %lx", my_mods[ i ].addr + j);
+              //}
+
+              struct page* pg      = vmalloc_to_page(pg_addr);
+              if (pg != NULL) {
+                long ret = remap_pfn_range(a_vma,
+                                          vm_start,
+                                          page_to_pfn(pg),
+                                          4096lu,
+                                          a_vma->vm_page_prot);
+                if (ret == 0l) {
+                } else {
+                  printk(KERN_INFO "remap_pfn_range = %lx", my_mods[ i ].addr + j);
+                }
+              }
+              vm_start += 4096lu;
+            }
+          }
+        }
+        mmap_write_unlock(perfing_mm);
+        mmput(perfing_mm);
+      }
+    }
+
+    (void) copy_to_user((void*) (mods),    &my_mods[ 0u ], my_no_mods * sizeof(mod_t));
+    (void) copy_to_user((void*) (no_mods), &my_no_mods,    sizeof(my_no_mods));
+  }
 
   if ((register_kprobe(&do_mmap_probe) == 0) && (register_kprobe(&do_mprotect_pkey_probe) == 0)) {
     dev_t dev;
