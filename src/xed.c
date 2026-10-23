@@ -48,6 +48,10 @@
 #define TIP_QUEUE_LEN  (1u * 1024u)
 
 typedef struct {
+#if defined(EN_RET_COMPRESSION)
+  unsigned int en_ret_compression;
+#endif
+
   unsigned int           tnt;
   unsigned int           tnt_len;
   double                 tsc;
@@ -61,6 +65,9 @@ typedef struct {
 } tip_t;
 
 typedef struct {
+  unsigned long long int async_src;
+  unsigned long long int async_dst;
+
   signed long long last_inst;
 
   call_stack_t     call_stack[ CALL_STACK_LEN ];
@@ -136,42 +143,8 @@ extern double tsc_hz_ns;
 extern double tsc_factor;
 extern double cbr_factor;
 
-#if defined(EN_VMLINUX)
-static inline __attribute__((always_inline)) void reparse_vmlinux(const unsigned long long old_addr,
-                                                                  const unsigned long long new_addr) {
-  unsigned int reparse = 0u;
-
-  if (new_addr >= vm_kernel_ks) {
-    for (unsigned long i = 0lu; i < no_mods; i++) {
-      if ((mods[ i ].addr <= new_addr) && (new_addr < mods[ i ].addr + mods[ i ].sz)) {
-        const xed_uint8_t* const inst_bytes = ((xed_uint8_t*) (mods[ i ].perfing_addr + new_addr - mods[ i ].addr));
-        const inst_t* const      inst       = xed_unwind_find_inst(new_addr);
-
-        if (inst != NULL) {
-          for (xed_uint_t j = 0u; j < inst->length; j++) {
-            if (inst_bytes[ j ] != inst->inst_bytes[ j ]) {
-              reparse = 1u;
-              break;
-            }
-          }
-        } else {
-          reparse = 1u;
-        }
-        break;
-      }
-    }
-  }
-
-  if (reparse == 1u) {
-    fprintf(stdout, "reparse_vmlinux :: %16llx -> %16llx\n", old_addr, new_addr);
-
-    memset(&insts[ no_insts_vmlinux ], 0, (MAX_NO_INSTS - no_insts_vmlinux) * sizeof(insts[ 0llu ]));
-    no_insts         = no_insts_vmlinux;
-    no_insts_vmlinux = 0llu;
-
-    parse_vmlinux();
-  }
-}
+#if defined(EN_RET_COMPRESSION)
+static unsigned int en_ret_compression = 0u;
 #endif
 
 static inline __attribute__((always_inline)) void add_tnt(const unsigned int           tnt,
@@ -183,6 +156,10 @@ static inline __attribute__((always_inline)) void add_tnt(const unsigned int    
 
     if (tnt_queue_head_next != this_ctx->tnt_queue_tail) {
       this_ctx->tnt_queue[ this_ctx->tnt_queue_head ] = (tnt_t) {
+#if defined(EN_RET_COMPRESSION)
+        .en_ret_compression = en_ret_compression,
+#endif
+
         .tnt     = tnt,
         .tnt_len = tnt_len,
         .tsc     = tsc,
@@ -190,7 +167,7 @@ static inline __attribute__((always_inline)) void add_tnt(const unsigned int    
       };
       this_ctx->tnt_queue_head                        = tnt_queue_head_next;
     } else {
-      fflush(branches_fp); fprintf(stderr, "BR Queue full!\n"); for (;;) {}
+      fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "BR Queue full!\n"); for (;;) {}
     }
   }
 }
@@ -200,7 +177,7 @@ static inline __attribute__((always_inline)) void add_tip(const unsigned long lo
                                                           const unsigned long long int cyc_cnt) {
   if (tip != 0llu) {
     if (tip > insts[ no_insts - 1llu ].addr) {
-      fflush(branches_fp); fprintf(stderr, "TIP out of bounds :: %16llx!\n", tip); for (;;) {}
+      fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "TIP out of bounds :: %16llx!\n", tip); for (;;) {}
     }
     const unsigned int tip_queue_head_next = (this_ctx->tip_queue_head + 1u) % TIP_QUEUE_LEN;
 
@@ -212,7 +189,7 @@ static inline __attribute__((always_inline)) void add_tip(const unsigned long lo
       };
       this_ctx->tip_queue_head                        = tip_queue_head_next;
     } else {
-      fflush(branches_fp); fprintf(stderr, "TIP Queue full!\n"); for (;;) {}
+      fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "TIP Queue full!\n"); for (;;) {}
     }
   }
 }
@@ -354,11 +331,24 @@ static void add_inst(const unsigned char* const   inst_bytes,
 }
 
 static void print_call_stack(void) {
-  fprintf(stdout, "Call Stack - Begin :: %3u\n", this_ctx->call_stack_idx);
-  for (unsigned int i = 0u; i < this_ctx->call_stack_idx; i++) {
-    fprintf(stdout, "%16llx %16llx\n", this_ctx->call_stack[ i ].call->addr, this_ctx->call_stack[ i ].ret->addr);
+  for (unsigned int i = 0u; i < MAX_NO_CTXS; i++) {
+    fprintf(stdout, "Call Stack - Begin :: %u %3u\n", i, ctx[ i ].call_stack_idx);
+    for (unsigned int j = 0u; j < ctx[ i ].call_stack_idx; j++) {
+      fprintf(stdout,
+              "%16llx -> %16llx -> %16llx :: %20.2lf %20.2lf :: %u\n",
+              ctx[ i ].call_stack[ j ].call->addr,
+              ctx[ i ].call_stack[ j ].t_call,
+              ctx[ i ].call_stack[ j ].ret->addr,
+              ctx[ i ].call_stack[ j ].tsc_c,
+              ctx[ i ].call_stack[ j ].tsc_r,
+#if defined(EN_RET_COMPRESSION)
+              ctx[ i ].call_stack[ j ].en_ret_compression);
+#else
+              0u);
+#endif
+    }
+    fprintf(stdout, "Call Stack - End\n");
   }
-  fprintf(stdout, "Call Stack - End\n");
 }
 
 static inline __attribute__((always_inline)) void reset_call_stack(void) {
@@ -783,12 +773,39 @@ void perfed_xed(const int perfed_pid __attribute__((unused))) {
   }
 }
 
+void xed_intel_pt_psb(const unsigned int           psb,
+                      const double                 tsc,
+                      const unsigned long long int cyc_cnt) {
+#if defined(EN_RET_COMPRESSION)
+  en_ret_compression = psb;
+
+  fprintf(branches_fp,
+          "RET_COMPRESSION :: %20.2lf %20llu :: %u :: %6u %6u %6u %6u\n",
+          tsc,
+          cyc_cnt,
+          en_ret_compression,
+          this_ctx->tnt_queue_head,
+          this_ctx->tnt_queue_tail,
+          this_ctx->tip_queue_head,
+          this_ctx->tip_queue_tail);
+#else
+  (void) (psb);
+  (void) (tsc);
+  (void) (cyc_cnt);
+#endif
+}
+
 void xed_intel_pt_ovf(const double                 tsc,
                       const unsigned long long int cyc_cnt) {
   fprintf(branches_fp, "Pid Reset %16llx :: %20.2lf %20llu\n", this_pgd, tsc, cyc_cnt);
   this_pgd = 0llu;
 
   fprintf(branches_fp, "O :: %20.2lf %20llu\n", tsc, cyc_cnt);
+
+  xed_async_reset(0llu, tsc, cyc_cnt, __FILE__, __LINE__);
+#if defined(EN_RET_COMPRESSION)
+  en_ret_compression = 0u;
+#endif
 }
 
 void xed_intel_pt_pip(const unsigned long long int pgd,
@@ -810,18 +827,16 @@ void xed_intel_pt_tsc(const double                 tsc,
   fprintf(branches_fp, "TSC :: %20.2lf\n", tsc);
 }
 
-void xed_intel_pt_ovf_fup(const unsigned long long int ip,
-                          const double                 tsc,
-                          const unsigned long long int cyc_cnt) {
-  fprintf(branches_fp, "O_FUP :: %20.2lf %20llu %16llx\n", tsc, cyc_cnt, ip);
-}
-
 void xed_intel_pt_tip_enable(const unsigned long long int tip,
                              const double                 tsc,
                              const unsigned long long int cyc_cnt) {
   reset_inst_stats(cyc_cnt);
 
   fprintf(branches_fp, "E :: %20.2lf %20llu %16llx\n", tsc, cyc_cnt, tip);
+
+#if defined(EN_RET_COMPRESSION)
+  en_ret_compression = 1u;
+#endif
 }
 
 void xed_intel_pt_bip_fup(const unsigned long long int a,
@@ -848,13 +863,17 @@ void xed_intel_pt_ptw_fup(const unsigned long long int ip,
 void xed_intel_pt_tip_disable(const double                 tsc,
                               const unsigned long long int cyc_cnt) {
   if (this_ctx->tnt_queue_head != this_ctx->tnt_queue_tail) {
-    fflush(branches_fp); fprintf(stderr, " BR Queue TIP_PGD\n"); for (;;) {}
+    fflush(branches_fp); fclose(branches_fp); fprintf(stderr, " BR Queue TIP_PGD :: %6u %6u\n", this_ctx->tnt_queue_head, this_ctx->tnt_queue_tail); for (;;) {}
   }
   if (this_ctx->tip_queue_head != this_ctx->tip_queue_tail) {
-    fflush(branches_fp); fprintf(stderr, "TIP Queue TIP_PGD\n"); for (;;) {}
+    fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "TIP Queue TIP_PGD\n"); for (;;) {}
   }
 
   fprintf(branches_fp, "D :: %20.2lf %20llu\n", tsc, cyc_cnt);
+
+#if defined(EN_RET_COMPRESSION)
+  en_ret_compression = 0u;
+#endif
 }
 
 void xed_tid_switch(const sw_util_t* const sw_util) {
@@ -1028,16 +1047,15 @@ void xed_ptrace_uregs(const double                         tsc,
 void xed_update_last_inst(const unsigned long long addr) {
   const inst_t* const inst = xed_unwind_find_inst(addr);
 
-#if defined(EN_VMLINUX) && defined(EN_VMLINUX_WIDE)
-  if ((this_pgd != ((unsigned long long int) (perfed_pgd))) && (addr <= vm_us)) {
-    this_ctx->last_inst = -1ll; return;
-  }
-#endif
-
   if (inst != NULL) {
     this_ctx->last_inst = ((signed long long) (inst - &insts[ 0u ]));
   } else {
     this_ctx->last_inst = -1ll;
+
+    if (xed_is_enabled(addr) == 0u) {
+      fprintf(branches_fp, "PGD :: %16llx %16lx :: %16llx\n", this_pgd, perfed_pgd, addr);
+      return;
+    }
 
 #if defined(EN_VMLINUX)
     if ((vm_kernel_ks <= addr) && (addr < vm_kernel_me)) {
@@ -1132,7 +1150,7 @@ void xed_process_branches(const unsigned int           tnt,
 #endif
       this_ctx->last_inst++;
       if (this_ctx->last_inst >= ((signed long long) (no_insts))) {
-        fprintf(stderr, "0 last_inst >= no_insts\n"); for (;;) {}
+        fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "last_inst >= no_insts :: 0\n"); for (;;) {}
       }
 #if defined(PRINT_XED)
       fprintf(branches_fp, "%s -> %16llx _ :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, 0.0);
@@ -1174,7 +1192,7 @@ void xed_process_branches(const unsigned int           tnt,
             branches_n++;
             this_ctx->last_inst++;
             if (this_ctx->last_inst >= ((signed long long) (no_insts))) {
-              fprintf(stderr, "1 last_inst >= no_insts\n"); for (;;) {}
+              fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "last_inst >= no_insts :: 1\n"); for (;;) {}
             }
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
             fprintf(branches_fp, "%s -> %16llx 0 :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, x_tnt->tsc);
@@ -1192,14 +1210,19 @@ void xed_process_branches(const unsigned int           tnt,
       } else if ((insts[ this_ctx->last_inst ].cofi.type & UNCOND_DIRECT_BRANCH) != 0u) {
         if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_CALL) {
           this_ctx->call_stack[ this_ctx->call_stack_idx ] = (call_stack_t) {
+#if defined(EN_RET_COMPRESSION)
+            .en_ret_compression = en_ret_compression,
+#endif
+
             .call       = &insts[ this_ctx->last_inst + 0ll ],
+            .t_call     = insts[ this_ctx->last_inst ].cofi.u.c.addr,
             .ret        = &insts[ this_ctx->last_inst + 1ll ],
             .tsc_c      = 0.0,
             .no_insts_c = 0llu
           };
           this_ctx->call_stack_idx++;
           if (this_ctx->call_stack_idx >= CALL_STACK_LEN) {
-            fprintf(stderr, "Full stack\n"); for (;;) {}
+            fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "Full stack\n"); for (;;) {}
           }
 
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
@@ -1220,40 +1243,46 @@ void xed_process_branches(const unsigned int           tnt,
         }
       } else if ((insts[ this_ctx->last_inst ].cofi.type & INDIRECT_BRANCH) != 0u) {
 #if defined(EN_RET_COMPRESSION)
-        if (insts[ this_ctx->last_inst ].iclass == XED_ICLASS_RET_NEAR) {
-          if (x_tnt != NULL) {
+        if ((insts[ this_ctx->last_inst ].iclass == XED_ICLASS_RET_NEAR) && (this_ctx->call_stack_idx >= 1u) && (x_tnt != NULL)) {
+          const unsigned int do_br = this_ctx->call_stack[ this_ctx->call_stack_idx - 1u ].en_ret_compression;
+
+          if (x_tnt->tnt_len == 0u) {
+            fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "x_tnt->tnt_len == 0u\n"); for (;;) {}
+          }
+
+          if (do_br == 1u) {
             const unsigned int br = x_tnt->tnt & (1u << (x_tnt->tnt_len - 1u));
+
+            if (x_tnt->en_ret_compression == 0u) {
+              fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "x_tnt->en_ret_compression == 0u\n"); for (;;) {}
+            }
 
             x_tnt->tnt_len--;
             if (br != 0u) {
-              if (this_ctx->call_stack_idx >= 1u) {
-                unsigned long long int ret;
+              unsigned long long int ret;
 
-                this_ctx->call_stack_idx--;
-                ret = this_ctx->call_stack[ this_ctx->call_stack_idx ].ret->addr;
-                this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r      = x_tnt->tsc;
-                this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = 0llu;
+              this_ctx->call_stack_idx--;
+              ret = this_ctx->call_stack[ this_ctx->call_stack_idx ].ret->addr;
+              this_ctx->call_stack[ this_ctx->call_stack_idx ].tsc_r      = x_tnt->tsc;
+              this_ctx->call_stack[ this_ctx->call_stack_idx ].no_insts_r = 0llu;
 
-                update_inst_stats(insts[ this_ctx->last_inst ].iclass);
-                branches_n++;
-                xed_update_last_inst(ret);
-#if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-                fprintf(branches_fp, "%s -> %16llx 1 :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, x_tnt->tsc);
-#endif
-                if (x_tnt->cyc_cnt != 0llu) {
-                  print_inst_stats(x_tnt->cyc_cnt);
+              update_inst_stats(insts[ this_ctx->last_inst ].iclass);
+              branches_n++;
+              xed_update_last_inst(ret);
+  #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
+              fprintf(branches_fp, "%s -> %16llx 1 :: %20.2lf\n", &branches_buffer[ 0u ], insts[ this_ctx->last_inst ].addr, x_tnt->tsc);
+  #endif
+              if (x_tnt->cyc_cnt != 0llu) {
+                print_inst_stats(x_tnt->cyc_cnt);
 
-                  x_tnt->tsc     = 0.0;
-                  x_tnt->cyc_cnt = 0llu;
-                }
-                continue;
-              } else {
-                print_call_stack(); fflush(branches_fp); fclose(branches_fp);
-                fprintf(stderr, "0 RET TNT :: %16llx :: %llu\n", insts[ this_ctx->last_inst ].addr, no_insts_vmlinux); for (;;) {}
+                x_tnt->tsc     = 0.0;
+                x_tnt->cyc_cnt = 0llu;
               }
+              continue;
             } else {
-              print_call_stack(); fflush(branches_fp); fclose(branches_fp);
-              fprintf(stderr, "1 RET TNT :: %16llx :: %llu\n", insts[ this_ctx->last_inst ].addr, no_insts_vmlinux); for (;;) {}
+              print_call_stack();
+
+              fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "RET TNT :: %16llx :: %llu\n", insts[ this_ctx->last_inst ].addr, no_insts_vmlinux); for (;;) {}
             }
           }
         }
@@ -1262,14 +1291,19 @@ void xed_process_branches(const unsigned int           tnt,
         if (x_tip != NULL) {
           if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_CALL) {
             this_ctx->call_stack[ this_ctx->call_stack_idx ] = (call_stack_t) {
+#if defined(EN_RET_COMPRESSION)
+              .en_ret_compression = en_ret_compression,
+#endif
+
               .call       = &insts[ this_ctx->last_inst + 0ll ],
+              .t_call     = x_tip->tip,
               .ret        = &insts[ this_ctx->last_inst + 1ll ],
               .tsc_c      = x_tip->tsc,
               .no_insts_c = branches_n
             };
             this_ctx->call_stack_idx++;
             if (this_ctx->call_stack_idx >= CALL_STACK_LEN) {
-              fprintf(stderr, "Full stack\n"); for (;;) {}
+              fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "Full stack\n"); for (;;) {}
             }
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_UNCOND_BR) {
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_RET) {
@@ -1316,17 +1350,21 @@ void xed_process_branches(const unsigned int           tnt,
           const xed_iclass_enum_t this_iclass = insts[ this_ctx->last_inst ].iclass;
 
           if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSCALL) {
+#if 0
             this_ctx->call_stack[ this_ctx->call_stack_idx ] = (call_stack_t) {
               .call       = &insts[ this_ctx->last_inst + 0ll ],
+              .t_call     = x_tip->tip,
               .ret        = &insts[ this_ctx->last_inst + 1ll ],
               .tsc_c      = x_tip->tsc,
               .no_insts_c = branches_n
             };
             this_ctx->call_stack_idx++;
             if (this_ctx->call_stack_idx >= CALL_STACK_LEN) {
-              fprintf(stderr, "Full stack\n"); for (;;) {}
+              fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "Full stack\n"); for (;;) {}
             }
+#endif
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSRET) {
+#if 0
             if (this_ctx->call_stack_idx >= 1u) {
               unsigned long long int ret;
 
@@ -1351,6 +1389,7 @@ void xed_process_branches(const unsigned int           tnt,
                 }
               }
             }
+#endif
           }
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;
@@ -1364,37 +1403,34 @@ void xed_process_branches(const unsigned int           tnt,
           if ((this_iclass == XED_ICLASS_IRET) || (this_iclass == XED_ICLASS_IRETD) || (this_iclass == XED_ICLASS_IRETQ)) {
             reset_inst_stats(cyc_cnt);
 
-            fprintf(branches_fp, "Async   Exit :: %20.2lf %16llx\n", x_tip->tsc, x_tip->tip);
+            fprintf(branches_fp, "Async   Exit :: %u :: %20.2lf %16llx %16llx\n", ctx_idx, x_tip->tsc, x_tip->tip, this_ctx->async_src);
             if (this_ctx->call_stack_idx != 0u) {
-              fflush(branches_fp); for (;;) {}
+              fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "Non-empty stack\n"); for (;;) {}
             }
             if (this_ctx->tnt_queue_head != this_ctx->tnt_queue_tail) {
-              fflush(branches_fp); fprintf(stderr, " BR Queue TIP_PGD\n"); for (;;) {}
+              fflush(branches_fp); fclose(branches_fp); fprintf(stderr, " BR Queue async exit :: %6u %6u\n", this_ctx->tnt_queue_head, this_ctx->tnt_queue_tail); for (;;) {}
             }
             if (this_ctx->tip_queue_head != this_ctx->tip_queue_tail) {
-              fflush(branches_fp); fprintf(stderr, "TIP Queue TIP_PGD\n"); for (;;) {}
+              fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "TIP Queue async exit\n"); for (;;) {}
+            }
+            if ((this_ctx->async_src != 0llu) && (this_ctx->async_src != x_tip->tip)) {
+              fprintf(branches_fp, "Async Adjust :: %u :: %20.2lf %16llx %16llx\n", ctx_idx, x_tip->tsc, x_tip->tip, this_ctx->async_src);
+              xed_async_reset(x_tip->tip, x_tip->tsc, x_tip->cyc_cnt, __FILE__, __LINE__);
             }
 
             if (this_ctx->last_inst == -1ll) {
               xed_async_reset(x_tip->tip, x_tip->tsc, x_tip->cyc_cnt, __FILE__, __LINE__);
-            } else {
-              if (ctx_idx >= 1u) {
-                ctx_idx--;
-              }
-              this_ctx = &ctx[ ctx_idx ];
             }
-            if ((this_ctx->last_inst != -1ll) && (x_tip->tip != insts[ this_ctx->last_inst ].addr)) {
-              //fprintf(branches_fp, "Async Adjust :: %20.2lf %16llx %16llx\n", x_tip->tsc, x_tip->tip, insts[ this_ctx->last_inst ].addr);
-
-              //reparse_vmlinux(insts[ this_ctx->last_inst ].addr, x_tip->tip);
-              //xed_update_last_inst(x_tip->tip);
+            if (ctx_idx >= 1u) {
+              ctx_idx--;
             }
+            this_ctx = &ctx[ ctx_idx ];
           }
         } else {
           return;
         }
       } else {
-        fprintf(stderr, "Unknown cofi type\n"); for (;;) {}
+        fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "Unknown cofi type\n"); for (;;) {}
       }
     }
   }
@@ -1412,28 +1448,31 @@ void xed_async_reset(const unsigned long long int tip,
     reset_call_stack();
     reset_last_inst();
   }
-  fprintf(branches_fp, "Async  Reset :: %20.2lf %16llx :: %s %u\n", tsc, tip, file, line);
+  fprintf(branches_fp, "Async  Reset :: x :: %20.2lf %16llx :: %s %u\n", tsc, tip, file, line);
   ctx_idx  = 0u;
   this_ctx = &ctx[ ctx_idx ];
 }
 
-void xed_async_enter(const unsigned long long int tip,
+void xed_async_enter(const unsigned long long int async_src,
+                     const unsigned long long int async_dst,
                      const double                 tsc,
                      const unsigned long long int cyc_cnt) {
   reset_inst_stats(cyc_cnt);
 
   if (this_ctx->tnt_queue_head != this_ctx->tnt_queue_tail) {
-    fflush(branches_fp); fprintf(stderr, " BR Queue TIP_PGD\n"); for (;;) {}
+    fflush(branches_fp); fclose(branches_fp); fprintf(stderr, " BR Queue async enter :: %6u %6u\n", this_ctx->tnt_queue_head, this_ctx->tnt_queue_tail); for (;;) {}
   }
   if (this_ctx->tip_queue_head != this_ctx->tip_queue_tail) {
-    fflush(branches_fp); fprintf(stderr, "TIP Queue TIP_PGD\n"); for (;;) {}
+    fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "TIP Queue async enter\n"); for (;;) {}
   }
   ctx_idx++;
   if (ctx_idx >= MAX_NO_CTXS) {
-    fprintf(stderr, "Full ctxs\n"); for (;;) {}
+    fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "Full ctxs\n"); for (;;) {}
   }
-  this_ctx = &ctx[ ctx_idx ];
-  fprintf(branches_fp, "Async  Enter :: %20.2lf %16llx\n", tsc, tip);
+  this_ctx            = &ctx[ ctx_idx ];
+  this_ctx->async_src = async_src;
+  this_ctx->async_dst = async_dst;
+  fprintf(branches_fp, "Async  Enter :: %u :: %20.2lf %16llx %16llx\n", ctx_idx, tsc, async_src, async_dst);
 }
 
 void xed_tsc_err(const double tsc_err) {

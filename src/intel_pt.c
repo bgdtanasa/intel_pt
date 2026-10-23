@@ -67,7 +67,7 @@
 #define AUX_DBG
 #endif
 
-#define INTEL_PT_PKT_HISTORY (64u)
+#define INTEL_PT_PKT_HISTORY (8192u)
 
 typedef enum {
   INTEL_PT_PKT_NONE,
@@ -103,10 +103,22 @@ typedef enum {
   INTEL_PT_PKT_CYC,
   INTEL_PT_PKT_SHORT_TNT,
 
+  INTEL_PT_PKT_OVF_FUP,
+  INTEL_PT_PKT_OVF_TIP_PGE,
+
   INTEL_PT_PKT_FUP_OVF,
   INTEL_PT_PKT_FUP_BEP,
   INTEL_PT_PKT_FUP_PTW,
   INTEL_PT_PKT_FUP_TIP,
+  INTEL_PT_PKT_FUP_TIP_PGD,
+
+  INTEL_PT_PKT_TIP_PGE_OVF,
+
+  INTEL_PT_PKT_TIP_NONE,
+  INTEL_PT_PKT_TIP_FUP,
+
+  INTEL_PT_PKT_TIP_PGD_NONE,
+  INTEL_PT_PKT_TIP_PGD_FUP
 } intel_pt_pkt_type_t;
 
 typedef struct {
@@ -120,6 +132,7 @@ typedef struct {
   } v;
   unsigned long long int   cyc_cnt;
   double                   tsc_approx;
+  unsigned char            ip_bytes;
 
 #if defined(AUX_DBG)
   const volatile unsigned char* x;
@@ -161,10 +174,22 @@ static const char*           intel_pt_pkt_names[ ] = {
   [ INTEL_PT_PKT_CYC ]       = "CYC",
   [ INTEL_PT_PKT_SHORT_TNT ] = "SHORT_TNT",
 
-  [ INTEL_PT_PKT_FUP_OVF ]   = "FUP_OVF",
-  [ INTEL_PT_PKT_FUP_BEP ]   = "FUP_BEP",
-  [ INTEL_PT_PKT_FUP_PTW ]   = "FUP_PTW",
-  [ INTEL_PT_PKT_FUP_TIP ]   = "FUP_TIP"
+  [ INTEL_PT_PKT_OVF_FUP ]     = "OVF_FUP",
+  [ INTEL_PT_PKT_OVF_TIP_PGE ] = "OVF_TIP_PGE",
+
+  [ INTEL_PT_PKT_FUP_OVF ]     = "FUP_OVF",
+  [ INTEL_PT_PKT_FUP_BEP ]     = "FUP_BEP",
+  [ INTEL_PT_PKT_FUP_PTW ]     = "FUP_PTW",
+  [ INTEL_PT_PKT_FUP_TIP ]     = "FUP_TIP",
+  [ INTEL_PT_PKT_FUP_TIP_PGD ] = "FUP_TIP_PGD",
+
+  [ INTEL_PT_PKT_TIP_PGE_OVF ] = "TIP_PGE_OVF",
+
+  [ INTEL_PT_PKT_TIP_NONE ] = "TIP_NONE",
+  [ INTEL_PT_PKT_TIP_FUP ]  = "TIP_FUP",
+
+  [ INTEL_PT_PKT_TIP_PGD_NONE ] = "TIP_PGD_NONE",
+  [ INTEL_PT_PKT_TIP_PGD_FUP ]  = "TIP_PGD_FUP"
 };
 static intel_pt_pkt_t        intel_pt_pkt_hist[ INTEL_PT_PKT_HISTORY ];
 static unsigned int          intel_pt_pkt_hist_idx;
@@ -247,24 +272,39 @@ static inline __attribute__((always_inline)) unsigned int is_timing_event(const 
           (type == INTEL_PT_PKT_CYC)) ? (1u) : (0u);
 }
 
-static unsigned int is_ovf_event(const unsigned long long int ip) {
-  (void) (ip);
+static unsigned int is_ovf_event(const unsigned long long int ip __attribute__((unused))) {
+  intel_pt_pkt_t* intel_pt_pkt = NULL;
 
   last_intel_pt_pkt_ovf = NULL;
   for (unsigned int i = 1u; i < INTEL_PT_PKT_HISTORY; i++) {
     const unsigned int j = (INTEL_PT_PKT_HISTORY + intel_pt_pkt_hist_idx - i) % INTEL_PT_PKT_HISTORY;
 
-    if ((i == 1u) && (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_FUP)) {
-      continue;
+    if (i == 1u) {
+      if ((intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_FUP) || (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_TIP_PGE)) {
+        intel_pt_pkt = &intel_pt_pkt_hist[ j ];
+        continue;
+      } else {
+        return 0u;
+      }
     }
 
     if (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_NONE) {
       return 0u;
     } else if ((is_timing_event(intel_pt_pkt_hist[ j ].type) == 1u) ||
                (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_PSB)    ||
-               (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_PSBEND)) {
+               (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_PSBEND) ||
+               (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_CBR)) {
       continue;
     } else if (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_OVF) {
+      if (intel_pt_pkt->type == INTEL_PT_PKT_FUP) {
+        intel_pt_pkt->type          = INTEL_PT_PKT_FUP_OVF;
+        intel_pt_pkt_hist[ j ].type = INTEL_PT_PKT_OVF_FUP;
+      } else if (intel_pt_pkt->type == INTEL_PT_PKT_TIP_PGE) {
+        intel_pt_pkt->type          = INTEL_PT_PKT_TIP_PGE_OVF;
+        intel_pt_pkt_hist[ j ].type = INTEL_PT_PKT_OVF_TIP_PGE;
+      } else {
+        fprintf(stderr, "is_ovf_event: unexpected packet type :: %d\n", intel_pt_pkt->type); for (;;) {}
+      }
       last_intel_pt_pkt_ovf = &intel_pt_pkt_hist[ j ];
       return 1u;
     } else {
@@ -274,14 +314,19 @@ static unsigned int is_ovf_event(const unsigned long long int ip) {
   return 0u;
 }
 
-static unsigned int is_async_event(const unsigned long long int ip) {
-  (void) (ip);
+static unsigned long long int is_async_event(const unsigned long long int ip __attribute__((unused))) {
+  intel_pt_pkt_t* intel_pt_pkt = NULL;
 
   for (unsigned int i = 1u; i < INTEL_PT_PKT_HISTORY; i++) {
     const unsigned int j = (INTEL_PT_PKT_HISTORY + intel_pt_pkt_hist_idx - i) % INTEL_PT_PKT_HISTORY;
 
-    if ((i == 1u) && (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_TIP)) {
-      continue;
+    if (i == 1u) {
+      if ((intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_TIP) || (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_TIP_PGD)) {
+        intel_pt_pkt = &intel_pt_pkt_hist[ j ];
+        continue;
+      } else {
+        return 0llu;
+      }
     }
 
     if (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_NONE) {
@@ -289,16 +334,25 @@ static unsigned int is_async_event(const unsigned long long int ip) {
     } else if ((is_timing_event(intel_pt_pkt_hist[ j ].type) == 1u) ||
                (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_VMCS)   ||
                (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_PIP)    ||
+               (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_CBR)    ||
                (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_MODE_EXEC)) {
       continue;
     } else if (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_FUP) {
-      intel_pt_pkt_hist[ j ].type = INTEL_PT_PKT_FUP_TIP;
-      return 1u;
+      if (intel_pt_pkt->type == INTEL_PT_PKT_TIP) {
+        intel_pt_pkt->type          = INTEL_PT_PKT_TIP_FUP;
+        intel_pt_pkt_hist[ j ].type = INTEL_PT_PKT_FUP_TIP;
+      } else if (intel_pt_pkt->type == INTEL_PT_PKT_TIP_PGD) {
+        intel_pt_pkt->type          = INTEL_PT_PKT_TIP_PGD_FUP;
+        intel_pt_pkt_hist[ j ].type = INTEL_PT_PKT_FUP_TIP_PGD;
+      } else {
+        fprintf(stderr, "is_async_event: unexpected packet type :: %d\n", intel_pt_pkt->type); for (;;) {}
+      }
+      return intel_pt_pkt_hist[ j ].v.ip;
     } else {
-      return 0u;
+      return 0llu;
     }
   }
-  return 0u;
+  return 0llu;
 }
 
 static void print_intel_pt_bytes(const volatile unsigned char* const x,
@@ -326,8 +380,9 @@ static void print_intel_pt_pkts(void) {
     } else {
 #if defined(AUX_DBG)
       fprintf(stdout,
-              "%4u " PRINT_FORMAT "%16llx %20llu %20.2lf :: %16llx %02x %02x %12llu\n",
+              "%4u %u " PRINT_FORMAT "%16llx %20llu %20.2lf :: %16llx %02x %02x %12llu\n",
               j,
+              intel_pt_pkt_hist[ j ].ip_bytes,
               intel_pt_pkt_names[ intel_pt_pkt_hist[ j ].type ],
               intel_pt_pkt_hist[ j ].v.val,
               intel_pt_pkt_hist[ j ].cyc_cnt,
@@ -338,8 +393,9 @@ static void print_intel_pt_pkts(void) {
               intel_pt_pkt_hist[ j ].n);
 #else
       fprintf(stdout,
-              "%4u " PRINT_FORMAT "%16llx %20llu %20.2lf\n",
+              "%4u %u " PRINT_FORMAT "%16llx %20llu %20.2lf\n",
               j,
+              intel_pt_pkt_hist[ j ].ip_bytes,
               intel_pt_pkt_names[ intel_pt_pkt_hist[ j ].type ],
               intel_pt_pkt_hist[ j ].v.val,
               intel_pt_pkt_hist[ j ].cyc_cnt,
@@ -529,14 +585,12 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   const volatile unsigned char* x_p = *x;
   unsigned long long int        n_p = *n;
 
-  unsigned long long int ip             = 0xFFFFFFFFFFFFFFFFllu;
-  const unsigned char    ip_bytes       = (((unsigned int) (x_p[ 0u ])) >> 5u) & 0x07u;
-  const unsigned char    ip_compressed  = ((ip_bytes == 3u) || ((ip_bytes == 6u))) ? (0u) : (1u);
-  unsigned char          last_ip_update = 1u;
+  unsigned long long int ip              = 0xFFFFFFFFFFFFFFFFllu;
+  const unsigned char    ip_bytes        = (((unsigned int) (x_p[ 0u ])) >> 5u) & 0x07u;
+  const unsigned char    ip_uncompressed = ((ip_bytes == 3u) || (ip_bytes == 6u)) ? (1u) : (0u);
+  unsigned char          last_ip_update  = 1u;
 
-  (void) (ip_compressed);
-
-  record_intel_pt_pkt(pkt_type, ip, cyc_cnt_ref, x_p, n_p);
+  record_intel_pt_pkt(pkt_type, ip, cyc_cnt_ref, x_p, n_p); last_intel_pt_pkt->ip_bytes = ip_bytes;
   x_p++;
   n_p--;
   switch (ip_bytes) {
@@ -666,25 +720,30 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   if (ip != 0llu) {
     if (pkt_type == INTEL_PT_PKT_FUP) {
       if (is_ovf_event(ip) == 1u) {
-        last_intel_pt_pkt->type = INTEL_PT_PKT_FUP_OVF;
+        //fprintf(stdout, "OVF with FUP\n");
 
-        xed_intel_pt_ovf_fup(ip, last_intel_pt_pkt_ovf->tsc_approx, last_intel_pt_pkt_ovf->cyc_cnt);
-        xed_async_reset(ip, last_intel_pt_pkt_ovf->tsc_approx, last_intel_pt_pkt_ovf->cyc_cnt, __FILE__, __LINE__);
+        // A FUP closing an OVF behaves as a TIP_PGE
+        xed_intel_pt_tip_enable(ip, tsc_approx_ref, cyc_cnt_ref);
         xed_update_last_inst(ip);
-        xed_process_branches(0u, 0u, 0llu, last_intel_pt_pkt_ovf->tsc_approx, last_intel_pt_pkt_ovf->cyc_cnt);
-
-#if defined(PRINT_PT)
-        fprintf(stdout, "FUP OVF       = %20llx\n", ip);
-#endif
+        xed_process_branches(0u, 0u, 0llu, tsc_approx_ref, cyc_cnt_ref);
       }
     } else if (pkt_type == INTEL_PT_PKT_TIP_PGE) {
+      if (is_ovf_event(ip) == 1u) {
+        //fprintf(stdout, "OVF with TIP_PGE\n");
+      }
+
+      // A TIP_PGE closing an OVF
       xed_intel_pt_tip_enable(ip, tsc_approx_ref, cyc_cnt_ref);
-      xed_async_reset(ip, tsc_approx_ref, cyc_cnt_ref, __FILE__, __LINE__);
       xed_update_last_inst(ip);
       xed_process_branches(0u, 0u, 0llu, tsc_approx_ref, cyc_cnt_ref);
     } else if (pkt_type == INTEL_PT_PKT_TIP) {
-      if (is_async_event(ip) == 1u) {
-        xed_async_enter(ip, tsc_approx_ref, cyc_cnt_ref);
+      const unsigned long long int async_src = is_async_event(ip); //(ip_uncompressed == 1u) ? (is_async_event(ip)) : (0llu);
+      const unsigned long long int async_dst = ip;
+
+      if (async_src != 0llu) {
+        //fprintf(stdout, "async TIP :: %16llx -> %16llx :: %20.2lf\n", async_src, async_dst, tsc_approx_ref);
+
+        xed_async_enter(async_src, async_dst, tsc_approx_ref, cyc_cnt_ref);
         xed_update_last_inst(ip);
         xed_process_branches(0u, 0u, 0llu, tsc_approx_ref, cyc_cnt_ref);
       } else {
@@ -766,6 +825,7 @@ decode_again:
       last_psb++;
 
       record_intel_pt_pkt(INTEL_PT_PKT_PSB, last_psb, cyc_cnt_ref, x, n);
+      xed_intel_pt_psb(0u, 0.0, cyc_cnt_ref);
       x += 4llu;
       n -= 4llu;
       goto decode_again;
@@ -934,6 +994,7 @@ decode_again:
       last_psb = 0u;
 
       record_intel_pt_pkt(INTEL_PT_PKT_PSBEND, 0llu, cyc_cnt_ref, x, n);
+      xed_intel_pt_psb(1u, 0.0, cyc_cnt_ref);
       x += 2llu;
       n -= 2llu;
       goto decode_again;

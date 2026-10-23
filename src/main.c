@@ -95,7 +95,7 @@
 
 #define MMAP_DATA_NO_PAGES (12llu)
 #define MMAP_SIZE          ((1llu + (1llu << (MMAP_DATA_NO_PAGES))) * (ONE_PAGE))
-#define MMAP_AUX_NO_PAGES  (19llu)
+#define MMAP_AUX_NO_PAGES  (16llu)
 #define MMAP_AUX_SIZE      ((1llu << (MMAP_AUX_NO_PAGES)) * (ONE_PAGE))
 
 #define DATA_BUFFER_SIZE (N_MB(2llu))
@@ -661,7 +661,7 @@ do_switch_util:
             } break;
 
             default: {
-              fprintf(stdout, "    RECORD_xxxxxx :: %2u\n", perf_header.type);
+              //fprintf(stdout, "    RECORD_xxxxxx :: %2u\n", perf_header.type);
             } break;
           }
         }
@@ -982,6 +982,8 @@ int main(int argc, char *argv[ ]) {
       fprintf(stdout, "\tPTWRITE Support       = %02x\n", (ebx >> 4u) & 0x01u);
       fprintf(stdout, "\tEvent Trace Support   = %02x\n", (ebx >> 7u) & 0x01u);
       fprintf(stdout, "\tTNT Disable Support   = %02x\n", (ebx >> 8u) & 0x01u);
+      fprintf(stdout, "\tToPA Output Support   = %02x\n", (ecx >> 0u) & 0x01u);
+      fprintf(stdout, "\tToPA M Output Entries = %02x\n", (ecx >> 1u) & 0x01u);
       // Leaf 14H :: ECX = 1
       eax = 0u; ebx = 0u; ecx = 0u; edx = 0u;
       __get_cpuid_count(0x14u, 0x01, &eax, &ebx, &ecx, &edx);

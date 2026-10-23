@@ -117,10 +117,16 @@ typedef struct {
 } inst_t;
 
 typedef struct {
-  const inst_t* call;
-  const inst_t* ret;
-  double        tsc_c;
-  double        tsc_r;
+#if defined(EN_RET_COMPRESSION)
+  unsigned int en_ret_compression;
+#endif
+
+  const inst_t*          call;
+  unsigned long long int t_call;
+  const inst_t*          ret;
+
+  double tsc_c;
+  double tsc_r;
 
   unsigned long long int no_insts_c;
   unsigned long long int no_insts_r;
@@ -156,6 +162,9 @@ extern void        parse_vmlinux(void);
 
 extern void perfed_xed(const int perfed_pid);
 
+extern void xed_intel_pt_psb(const unsigned int           psb,
+                             const double                 tsc,
+                             const unsigned long long int cyc_cnt);
 extern void xed_intel_pt_ovf(const double                 tsc,
                              const unsigned long long int cyc_cnt);
 extern void xed_intel_pt_pip(const unsigned long long int pgd,
@@ -163,9 +172,6 @@ extern void xed_intel_pt_pip(const unsigned long long int pgd,
                              const unsigned long long int cyc_cnt);
 extern void xed_intel_pt_tsc(const double                 tsc,
                              const unsigned long long int cyc_cnt);
-extern void xed_intel_pt_ovf_fup(const unsigned long long int ip,
-                                 const double                 tsc,
-                                 const unsigned long long int cyc_cnt);
 extern void xed_intel_pt_tip_enable(const unsigned long long int tip,
                                     const double                 tsc,
                                     const unsigned long long int cyc_cnt);
@@ -200,7 +206,8 @@ extern void xed_async_reset(const unsigned long long int tip,
                             const unsigned long long int cyc_cnt,
                             const char* const            file,
                             const unsigned int           line);
-extern void xed_async_enter(const unsigned long long int tip,
+extern void xed_async_enter(const unsigned long long int async_src,
+                            const unsigned long long int async_dst,
                             const double                 tsc,
                             const unsigned long long int cyc_cnt);
 
