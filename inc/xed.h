@@ -15,7 +15,7 @@
 
 #include <sys/user.h>
 
-#if 0
+#if 1
 #define PRINT_XED
 #else
 #if 0
@@ -187,7 +187,9 @@ extern void xed_intel_pt_ptw_fup(const unsigned long long int ip,
 extern void xed_intel_pt_tip_disable(const double                 tsc,
                                      const unsigned long long int cyc_cnt);
 
+#if defined(EN_SW_UTIL)
 extern void xed_tid_switch(const sw_util_t* const sw_util);
+#endif
 
 extern void xed_update_last_inst(const unsigned long long addr);
 extern void xed_process_branches(const unsigned int           tnt,

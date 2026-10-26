@@ -250,11 +250,13 @@ unsigned long long int tsc_ratio;
 unsigned long long int base_hz;
 unsigned long long int bus_hz;
 
+#if defined(EN_SW_UTIL)
 static __u64 switch_ref;
 static __u64 switch_in;
 static __u64 switch_out;
 static __u64 last_switch_in;
 static __u64 last_switch_out;
+#endif
 
 #if defined(EN_PTRACE_UNWIND)
 static struct user_regs_struct ptrace_uregs;
@@ -309,15 +311,19 @@ static void* perfing_main(void* args __attribute__((unused))) {
   if (ret == 0) {
     unsigned int no_record_lost   = 0u;
     unsigned int no_record_aux    = 0u;
+#if defined(EN_SW_UTIL)
     unsigned int no_record_switch = 0u;
+#endif
 
     unsigned long long int sz_record_aux = 0llu;
 
     double aux_util     = 0.0;
     double aux_util_max = 0.0;
 
+#if defined(EN_SW_UTIL)
     double      switch_util = 0.0;
     sample_id_t switch_id   = { 0 };
+#endif
 
     const __u64 data_size      = perf_metadata->data_size;
     __u64       data_tail      = __atomic_load_n(&perf_metadata->data_tail, __ATOMIC_ACQUIRE);
@@ -603,6 +609,7 @@ static void* perfing_main(void* args __attribute__((unused))) {
 #endif
             } break;
 
+#if defined(EN_SW_UTIL)
             case PERF_RECORD_SWITCH: {
               memcpy(&switch_id, &perf_record->record_switch.id, sizeof(sample_id_t));
               if (switch_id.tid != ((__u32) (perfed_pid))) {
@@ -648,8 +655,8 @@ do_switch_util:
                       (perf_header.misc & (PERF_RECORD_MISC_SWITCH_OUT | PERF_RECORD_MISC_SWITCH_OUT_PREEMPT)) ? ("ON  -> OFF") : ("OFF ->  ON"),
                       no_record_switch);
 #endif
-#if 0
-              if (sw_util_queue[ sw_util_queue_head ].tsc == 0.0) {
+
+              if (sw_util_queue[ sw_util_queue_head ].tsc == 0llu) {
                 sw_util_queue[ sw_util_queue_head ] = (sw_util_t) {
                   .tsc  = switch_id.time,
                   .out  = (perf_header.misc & (PERF_RECORD_MISC_SWITCH_OUT | PERF_RECORD_MISC_SWITCH_OUT_PREEMPT)) ? (1u) : (0u),
@@ -657,11 +664,11 @@ do_switch_util:
                 };
                 sw_util_queue_head = (sw_util_queue_head + 1u) % SW_UTIL_QUEUE_LEN;
               }
-#endif
             } break;
+#endif
 
             default: {
-              //fprintf(stdout, "    RECORD_xxxxxx :: %2u\n", perf_header.type);
+              fprintf(stdout, "    RECORD_xxxxxx :: %2u\n", perf_header.type);
             } break;
           }
         }
@@ -764,7 +771,11 @@ static void perfed_setup(void) {
     perf_attrs.mmap2          = 1;
     perf_attrs.comm_exec      = 1;
     perf_attrs.use_clockid    = 1;
+#if defined(EN_SW_UTIL)
     perf_attrs.context_switch = 1;
+#else
+    perf_attrs.context_switch = 0;
+#endif
     perf_attrs.ksymbol        = 1;
     perf_attrs.bpf_event      = 1;
     //perf_attrs.aux_output     = 1;

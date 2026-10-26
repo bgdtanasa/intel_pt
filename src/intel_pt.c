@@ -517,7 +517,7 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
     tsc_approx_ref_prev = 0.0;
   }
 
-#if 0
+#if defined(EN_SW_UTIL)
   {
     sw_util_t* const sw_util = &sw_util_queue[ sw_util_queue_tail ];
 

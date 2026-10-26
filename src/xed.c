@@ -103,9 +103,11 @@ inst_t*            insts;
 unsigned long long no_insts;
 unsigned long long no_insts_vmlinux;
 
+#if defined(EN_SW_UTIL)
 sw_util_t    sw_util_queue[ SW_UTIL_QUEUE_LEN ];
 unsigned int sw_util_queue_head;
 unsigned int sw_util_queue_tail;
+#endif
 
 static ctx_t        ctx[ MAX_NO_CTXS ] = {
   [ 0u ] = {
@@ -871,6 +873,7 @@ void xed_intel_pt_tip_disable(const double                 tsc,
 #endif
 }
 
+#if defined(EN_SW_UTIL)
 void xed_tid_switch(const sw_util_t* const sw_util) {
   if (sw_util->out == 1u) {
     fprintf(branches_fp, "Y :: %20.2lf %6.2lf\n", ((double) (sw_util->tsc)), sw_util->util);
@@ -878,6 +881,7 @@ void xed_tid_switch(const sw_util_t* const sw_util) {
     fprintf(branches_fp, "X :: %20.2lf %6.2lf\n", ((double) (sw_util->tsc)), sw_util->util);
   }
 }
+#endif
 
 void xed_update_last_inst(const unsigned long long addr) {
   const inst_t* const inst = xed_unwind_find_inst(addr);
