@@ -11,8 +11,6 @@
 #define UNWIND_QUEUE_LEN    (32768u)
 
 typedef struct {
-  unsigned int           flags;
-
   unsigned int           no_insts;
   const inst_t*          insts[ MAX_NO_UNWIND_INSTS ];
 

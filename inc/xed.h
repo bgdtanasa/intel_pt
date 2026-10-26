@@ -15,7 +15,7 @@
 
 #include <sys/user.h>
 
-#if 1
+#if 0
 #define PRINT_XED
 #else
 #if 0
@@ -189,11 +189,6 @@ extern void xed_intel_pt_tip_disable(const double                 tsc,
 
 extern void xed_tid_switch(const sw_util_t* const sw_util);
 
-#if defined(EN_PTRACE_UNWIND)
-extern void xed_ptrace_uregs(const double                         tsc,
-                             const struct user_regs_struct* const uregs);
-#endif
-
 extern void xed_update_last_inst(const unsigned long long addr);
 extern void xed_process_branches(const unsigned int           tnt,
                                  const unsigned int           tnt_len,
@@ -215,6 +210,7 @@ extern void xed_tsc_err(const double tsc_err);
 
 extern const inst_t*         xed_unwind_find_inst(const unsigned long long int addr);
 #if defined(EN_PTRACE_UNWIND)
+extern void                  xed_unwind(void);
 extern const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr);
 extern void                  xed_unwind_link_inst_to_dwarf(void);
 #endif

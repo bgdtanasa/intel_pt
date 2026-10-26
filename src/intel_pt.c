@@ -535,7 +535,7 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
     const double          attach_tsc   = ((double) (unwind_insts->attach_tsc));
 
     if ((unwind_insts->no_insts >= 1u) && (tsc_approx_ref >= attach_tsc)) {
-      unwind_insts->flags = 1u;
+      xed_unwind();
     }
   }
 #endif
@@ -589,6 +589,8 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   const unsigned char    ip_bytes        = (((unsigned int) (x_p[ 0u ])) >> 5u) & 0x07u;
   const unsigned char    ip_uncompressed = ((ip_bytes == 3u) || (ip_bytes == 6u)) ? (1u) : (0u);
   unsigned char          last_ip_update  = 1u;
+
+  (void) (ip_uncompressed);
 
   record_intel_pt_pkt(pkt_type, ip, cyc_cnt_ref, x_p, n_p); last_intel_pt_pkt->ip_bytes = ip_bytes;
   x_p++;

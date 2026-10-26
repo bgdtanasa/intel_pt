@@ -330,12 +330,13 @@ static void add_inst(const unsigned char* const   inst_bytes,
   no_insts++;
 }
 
-static void print_call_stack(void) {
-  for (unsigned int i = 0u; i < MAX_NO_CTXS; i++) {
-    fprintf(stdout, "Call Stack - Begin :: %u %3u\n", i, ctx[ i ].call_stack_idx);
-    for (unsigned int j = 0u; j < ctx[ i ].call_stack_idx; j++) {
-      fprintf(stdout,
-              "%16llx -> %16llx -> %16llx :: %20.2lf %20.2lf :: %u\n",
+static void print_call_stack(FILE* const fp) {
+  for (signed int i = ((signed int) (ctx_idx)); i >= 0; i--) {
+    for (signed int j = ((signed int) (ctx[ i ].call_stack_idx - 1u)); j >= 0 ; j--) {
+      fprintf(fp,
+              "%2d/%2d :: %16llx -> %16llx -> %16llx :: %20.2lf %20.2lf :: %u\n",
+              j,
+              i,
               ctx[ i ].call_stack[ j ].call->addr,
               ctx[ i ].call_stack[ j ].t_call,
               ctx[ i ].call_stack[ j ].ret->addr,
@@ -347,7 +348,6 @@ static void print_call_stack(void) {
               0u);
 #endif
     }
-    fprintf(stdout, "Call Stack - End\n");
   }
 }
 
@@ -776,22 +776,17 @@ void perfed_xed(const int perfed_pid __attribute__((unused))) {
 void xed_intel_pt_psb(const unsigned int           psb,
                       const double                 tsc,
                       const unsigned long long int cyc_cnt) {
-#if defined(EN_RET_COMPRESSION)
-  en_ret_compression = psb;
-
-  fprintf(branches_fp,
-          "RET_COMPRESSION :: %20.2lf %20llu :: %u :: %6u %6u %6u %6u\n",
-          tsc,
-          cyc_cnt,
-          en_ret_compression,
-          this_ctx->tnt_queue_head,
-          this_ctx->tnt_queue_tail,
-          this_ctx->tip_queue_head,
-          this_ctx->tip_queue_tail);
+#if 0
+  //fprintf(branches_fp, "PSB :: %20.2lf %20llu\n", tsc, cyc_cnt);
 #else
-  (void) (psb);
   (void) (tsc);
   (void) (cyc_cnt);
+#endif
+
+#if defined(EN_RET_COMPRESSION)
+  en_ret_compression = psb;
+#else
+  (void) (psb);
 #endif
 }
 
@@ -884,166 +879,6 @@ void xed_tid_switch(const sw_util_t* const sw_util) {
   }
 }
 
-#if defined(EN_PTRACE_UNWIND)
-void xed_ptrace_uregs(const double                         tsc,
-                      const struct user_regs_struct* const uregs) {
-  fprintf(branches_fp, "R :: %20.2lf RAX = %16llx\n", tsc, uregs->rax);
-  fprintf(branches_fp, "R :: %20.2lf RDX = %16llx\n", tsc, uregs->rdx);
-  fprintf(branches_fp, "R :: %20.2lf RCX = %16llx\n", tsc, uregs->rcx);
-  fprintf(branches_fp, "R :: %20.2lf RBX = %16llx\n", tsc, uregs->rbx);
-  fprintf(branches_fp, "R :: %20.2lf RSI = %16llx\n", tsc, uregs->rsi);
-  fprintf(branches_fp, "R :: %20.2lf RDI = %16llx\n", tsc, uregs->rdi);
-  fprintf(branches_fp, "R :: %20.2lf RBP = %16llx\n", tsc, uregs->rbp);
-  fprintf(branches_fp, "R :: %20.2lf RSP = %16llx\n", tsc, uregs->rsp);
-  fprintf(branches_fp, "R :: %20.2lf R08 = %16llx\n", tsc, uregs->r8);
-  fprintf(branches_fp, "R :: %20.2lf R09 = %16llx\n", tsc, uregs->r9);
-  fprintf(branches_fp, "R :: %20.2lf R10 = %16llx\n", tsc, uregs->r10);
-  fprintf(branches_fp, "R :: %20.2lf R11 = %16llx\n", tsc, uregs->r11);
-  fprintf(branches_fp, "R :: %20.2lf R12 = %16llx\n", tsc, uregs->r12);
-  fprintf(branches_fp, "R :: %20.2lf R13 = %16llx\n", tsc, uregs->r13);
-  fprintf(branches_fp, "R :: %20.2lf R14 = %16llx\n", tsc, uregs->r14);
-  fprintf(branches_fp, "R :: %20.2lf R15 = %16llx\n", tsc, uregs->r15);
-  fprintf(branches_fp, "R :: %20.2lf RIP = %16llx\n", tsc, uregs->rip);
-#if 0
-  {
-    const inst_t* const inst = xed_unwind_find_inst(uregs->rip);
-
-    if (inst != NULL) {
-      const unsigned int this_ctx_idx = ctx_idx;
-
-      this_ctx = &ctx[ 0u ];
-      if (inst->cofi.type == 0u) {
-        xed_update_last_inst(uregs->rip);
-        xed_process_branches(0u, 0u, 0llu, 0.0, 0llu);
-      } else if (inst->cofi.type & COND_BRANCH) {
-        unsigned int tnt = 2u;
-
-        switch (inst->iclass) {
-          case XED_ICLASS_JB: {
-            const unsigned long long int cf = CF(uregs->eflags);
-
-            tnt = (cf == 1llu) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JBE: {
-            const unsigned long long int cf = CF(uregs->eflags);
-            const unsigned long long int zf = ZF(uregs->eflags);
-
-            tnt = ((cf == 1llu) || (zf == 1llu)) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JL: {
-            const unsigned long long int sf = SF(uregs->eflags);
-            const unsigned long long int of = OF(uregs->eflags);
-
-            tnt = (sf != of) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JLE: {
-            const unsigned long long int zf = ZF(uregs->eflags);
-            const unsigned long long int sf = SF(uregs->eflags);
-            const unsigned long long int of = OF(uregs->eflags);
-
-            tnt = ((zf == 1llu) || (sf != of)) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JNB: {
-            const unsigned long long int cf = CF(uregs->eflags);
-
-            tnt = (cf == 0llu) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JNBE: {
-            const unsigned long long int cf = CF(uregs->eflags);
-            const unsigned long long int zf = ZF(uregs->eflags);
-
-            tnt = ((cf == 0llu) && (zf == 0llu)) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JNL: {
-            const unsigned long long int sf = SF(uregs->eflags);
-            const unsigned long long int of = OF(uregs->eflags);
-
-            tnt = (sf == of) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JNLE: {
-            const unsigned long long int zf = ZF(uregs->eflags);
-            const unsigned long long int sf = SF(uregs->eflags);
-            const unsigned long long int of = OF(uregs->eflags);
-
-            tnt = ((zf == 0llu) && (sf == of)) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JNP: {
-            const unsigned long long int pf = PF(uregs->eflags);
-
-            tnt = (pf == 0llu) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JNS: {
-            const unsigned long long int sf = SF(uregs->eflags);
-
-            tnt = (sf == 0llu) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JNZ: {
-            const unsigned long long int zf = ZF(uregs->eflags);
-
-            tnt = (zf == 0llu) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JO: {
-            const unsigned long long int of = OF(uregs->eflags);
-
-            tnt = (of == 1llu) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JP: {
-            const unsigned long long int pf = PF(uregs->eflags);
-
-            tnt = (pf == 1llu) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JS: {
-            const unsigned long long int sf = SF(uregs->eflags);
-
-            tnt = (sf == 1llu) ? (1u) : (0u);
-          } break;
-
-          case XED_ICLASS_JZ: {
-            const unsigned long long int zf = ZF(uregs->eflags);
-
-            tnt = (zf == 1llu) ? (1u) : (0u);
-          } break;
-
-          default: {
-            fprintf(stderr, "ICLASS = %d\n", inst->iclass); for (;;) {}
-            tnt = 2u;
-          } break;
-        }
-
-        if (tnt <= 1u) {
-          xed_update_last_inst(uregs->rip);
-          xed_process_branches(tnt, 1u, 0llu, 0.0, 0llu);
-        }
-      }
-      this_ctx = &ctx[ this_ctx_idx ];
-    }
-  }
-#endif
-  fprintf(branches_fp, "R :: %20.2lf FLG = %16llx\n", tsc, uregs->eflags);
-  fprintf(branches_fp, "R :: %20.2lf  ES = %16llx\n", tsc, uregs->es);
-  fprintf(branches_fp, "R :: %20.2lf  CS = %16llx\n", tsc, uregs->cs);
-  fprintf(branches_fp, "R :: %20.2lf  SS = %16llx\n", tsc, uregs->ss);
-  fprintf(branches_fp, "R :: %20.2lf  DS = %16llx\n", tsc, uregs->ds);
-  fprintf(branches_fp, "R :: %20.2lf  FS = %16llx\n", tsc, uregs->fs);
-  fprintf(branches_fp, "R :: %20.2lf  GS = %16llx\n", tsc, uregs->gs);
-  fprintf(branches_fp, "R :: %20.2lf FSB = %16llx\n", tsc, uregs->fs_base);
-  fprintf(branches_fp, "R :: %20.2lf GSB = %16llx\n", tsc, uregs->gs_base);
-}
-#endif
-
 void xed_update_last_inst(const unsigned long long addr) {
   const inst_t* const inst = xed_unwind_find_inst(addr);
 
@@ -1105,15 +940,6 @@ void xed_process_branches(const unsigned int           tnt,
     if (this_ctx->last_inst == -1ll) {
       break;
     }
-#if defined(EN_PTRACE_UNWIND)
-    {
-      const unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
-
-      if ((unwind_insts->flags == 1u) && ((insts[ this_ctx->last_inst ].addr + 0llu == unwind_insts->insts[ 0u ]->addr) || (insts[ this_ctx->last_inst ].addr + 2llu == unwind_insts->insts[ 0u ]->addr))) {
-        print_unwind(branches_fp);
-      }
-    }
-#endif
 #if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
 #if defined(PRINT_XED_BRANCHES_ONLY)
     if (insts[ this_ctx->last_inst ].cofi.type != 0u) {
@@ -1280,7 +1106,7 @@ void xed_process_branches(const unsigned int           tnt,
               }
               continue;
             } else {
-              print_call_stack();
+              print_call_stack(branches_fp);
 
               fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "RET TNT :: %16llx :: %llu\n", insts[ this_ctx->last_inst ].addr, no_insts_vmlinux); for (;;) {}
             }
@@ -1350,7 +1176,6 @@ void xed_process_branches(const unsigned int           tnt,
           const xed_iclass_enum_t this_iclass = insts[ this_ctx->last_inst ].iclass;
 
           if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSCALL) {
-#if 0
             this_ctx->call_stack[ this_ctx->call_stack_idx ] = (call_stack_t) {
               .call       = &insts[ this_ctx->last_inst + 0ll ],
               .t_call     = x_tip->tip,
@@ -1362,9 +1187,7 @@ void xed_process_branches(const unsigned int           tnt,
             if (this_ctx->call_stack_idx >= CALL_STACK_LEN) {
               fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "Full stack\n"); for (;;) {}
             }
-#endif
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSRET) {
-#if 0
             if (this_ctx->call_stack_idx >= 1u) {
               unsigned long long int ret;
 
@@ -1389,7 +1212,6 @@ void xed_process_branches(const unsigned int           tnt,
                 }
               }
             }
-#endif
           }
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;
@@ -1545,6 +1367,11 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
 }
 
 #if defined(EN_PTRACE_UNWIND)
+void xed_unwind(void) {
+  print_unwind(branches_fp);
+  print_call_stack(branches_fp);
+}
+
 const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr) {
   signed long long int   a = 0ll;
   signed long long int   b = ((signed long long int) (no_dwarf_unwinds - 1llu));
