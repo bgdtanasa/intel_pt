@@ -376,6 +376,7 @@ static int x_init(void) {
     printk(KERN_INFO "KMOD :: _text = %016lx", _text);
     printk(KERN_INFO "KMOD :: _end  = %016lx", _end);
 
+    // just kernel code
     strcpy(&my_mods[ 0u ].name[ 0u ], "vmlinux_raw");
     my_mods[ 0u ].addr         = _text;
     my_mods[ 0u ].sz           = _end - _text;
@@ -384,6 +385,25 @@ static int x_init(void) {
     mods_sz    += my_mods[ 0u ].sz;
     my_no_mods += 1u;
 
+    // kprobe_insn_page
+    strcpy(&my_mods[ my_no_mods ].name[ 0u ], "kprobe_insn_page");
+    my_mods[ my_no_mods ].addr         = 0xffffffffa113d000lu;
+    my_mods[ my_no_mods ].sz           = 4096lu;
+    my_mods[ my_no_mods ].perfing_addr = 0lu;
+
+    mods_sz    += my_mods[ my_no_mods ].sz;
+    my_no_mods += 1u;
+
+    // kprobe_optinsn_page
+    strcpy(&my_mods[ my_no_mods ].name[ 0u ], "kprobe_optinsn_page");
+    my_mods[ my_no_mods ].addr         = 0xffffffffa2154000lu;
+    my_mods[ my_no_mods ].sz           = 4096lu;
+    my_mods[ my_no_mods ].perfing_addr = 0lu;
+
+    mods_sz    += my_mods[ my_no_mods ].sz;
+    my_no_mods += 1u;
+
+    // module code
     mutex_lock(module_mutex);
     list_for_each_entry(mod, modules, list) {
       if ((mod->state == MODULE_STATE_LIVE) || (mod->state == MODULE_STATE_COMING)) {
@@ -392,21 +412,6 @@ static int x_init(void) {
         if (a == 0lu) {
           continue;
         }
-
-#if 0
-        if (strstr(&mod->name[ 0u ], "nf_defrag_ipv4") != NULL) {
-          struct mod_kallsyms* mod_kallsyms = mod->kallsyms;
-          if (mod_kallsyms != NULL) {
-            for (unsigned int s = 0u; s < mod_kallsyms->num_symtab; s++) {
-              Elf_Sym* sym = &mod_kallsyms->symtab[ s ];
-
-              if (sym != NULL) {
-                printk(KERN_INFO "KMOD :: %16llx %s", sym->st_value, &mod_kallsyms->strtab[ sym->st_name ]);
-              }
-            }
-          }
-        }
-#endif
 
         for (i = 1u; i < my_no_mods ; i++) {
           const unsigned long b = ((unsigned long) (my_mods[ i ].addr));
@@ -420,7 +425,7 @@ static int x_init(void) {
             my_mods[ j + 1u ] = my_mods[ j ];
           }
         }
-        strcpy(&my_mods[ i ].name[ 0lu ], &mod->name[ 0u ]);
+        strcpy(&my_mods[ i ].name[ 0u ], &mod->name[ 0u ]);
         my_mods[ i ].addr         = ((unsigned long) (mod->mem[ MOD_TEXT ].base));
         my_mods[ i ].sz           = ((unsigned long) (mod->mem[ MOD_TEXT ].size));
         my_mods[ i ].perfing_addr = 0lu;

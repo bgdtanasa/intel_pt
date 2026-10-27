@@ -1231,6 +1231,8 @@ void xed_process_branches(const unsigned int           tnt,
 
             fprintf(branches_fp, "Async   Exit :: %u :: %20.2lf %16llx %16llx\n", ctx_idx, x_tip->tsc, x_tip->tip, this_ctx->async_src);
             if (this_ctx->call_stack_idx != 0u) {
+              print_call_stack(branches_fp);
+
               fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "Non-empty stack\n"); for (;;) {}
             }
             if (this_ctx->tnt_queue_head != this_ctx->tnt_queue_tail) {
