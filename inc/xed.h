@@ -15,16 +15,11 @@
 
 #include <sys/user.h>
 
-#if 1
+#if 0
 #define PRINT_XED
 #else
 #if 0
 #define PRINT_XED_BRANCHES_ONLY
-#endif
-#endif
-#if defined(PRINT_XED) || defined(PRINT_XED_BRANCHES_ONLY)
-#if 0
-#define PRINT_XED_OPCODE
 #endif
 #endif
 
@@ -37,7 +32,7 @@
 #define MAX_NO_BINARIES      (512u)
 #define MAX_BINARY_LENGTH    (256u)
 #define MAX_NO_INSTS         (60000000llu)
-#define MAX_NO_CTXS          (5u)
+#define MAX_NO_CTXS          (25u)
 
 #define SW_UTIL_QUEUE_LEN (1u * 1024u)
 
@@ -109,10 +104,7 @@ typedef struct {
   xed_category_enum_t    category;
   xed_iclass_enum_t      iclass;
   xed_uint_t             length;
-  xed_uint8_t            inst_bytes[ XED_MAX_INSTRUCTION_BYTES ];
-
   cofi_t                 cofi;
-
   const dwarf_unwind_t*  dwarf_unwind;
 } inst_t;
 

@@ -11,6 +11,7 @@ export PID=$3
 rm -rf insts/insts.*
 rm -rf addr2lines/addr2line.*
 
+# Part 0
 awk '{
 	if (index($0, " -> ")) {
 		if (index($4, "ffffffff")) {
@@ -23,13 +24,14 @@ awk '{
 }' $LOG_FILE_PATH
 echo "Generating the insts.* files ... Done"
 
+# Part 1.0
 U=$(grep "r[-w]x[sp]" /proc/${PID}/maps | awk '{print $6}')
-for l in $U;
+while IFS= read -r l;
 do
-    if [[ -f "$l" ]];
+    if [[ -f "${l}" ]];
     then
-        a=$(basename $l)
-        if [[ "$a" == *"vdso"* ]];
+        a=$(basename "${l}")
+        if [[ "${a}" == *"vdso"* ]];
         then
 			b="[vdso]"
         else
@@ -38,31 +40,46 @@ do
 
 		if [[ -s "insts/insts.${a}" ]];
 		then
-			echo "Generating resources for $l :: $b"
-			DEBUGINFOD_URLS= INSTS_FILE_PATH=insts/insts.${a} BINARY=${b} gdb -q -batch -ex "source ${RESOURCES_PATH}/binary_gdb_addr2func.py" --args $l 2>&1 > addr2lines/addr2line.${a}
+			echo "Generating resources for ${l} :: ${b}"
+			DEBUGINFOD_URLS= INSTS_FILE_PATH=insts/insts.${a} BINARY=${b} gdb -q -batch -ex "source ${RESOURCES_PATH}/binary_gdb_addr2func.py" --args ${l} 2>&1 > addr2lines/addr2line.${a}
+
+			if [[ -s "addr2lines/addr2line.${a}" ]];
+			then
+				N=$(wc -l insts/insts.${a} | awk '{print $1}')
+				M=$(wc -l addr2lines/addr2line.${a} | awk '{print $1}')
+				if [[ "${N}" != "${M}" ]];
+				then
+					echo "Resources do not match :: insts/insts.${a} vs addr2lines/addr2line.${a}"
+					exit -1
+				fi
+			else
+				echo "Resource not created :: addr2lines/addr2line.${a}"
+				exit -1
+			fi
 		fi
     else
-        echo "Invalid resource $l"
+        echo "Invalid resource ${l}"
     fi
-done
-
+done <<< "${U}"
+# Part 1.1
 l=vmlinux
 a=vmlinux
 b=vmlinux
 
 if [[ -s "insts/insts.${a}" ]];
 then
-	echo "Generating resources for $l :: $b"
+	echo "Generating resources for ${l} :: ${b}"
 	DEBUGINFOD_URLS= INSTS_FILE_PATH=insts/insts.${a} BINARY=${b} gdb -q -batch -ex "source ${RESOURCES_PATH}/vmlinux_gdb_addr2func.py" 2>&1 > addr2lines/addr2line.${a}
 fi
-
 echo "Generating the addr2line.* files ... Done"
+
+# Part 2
 sort -n -k 1 addr2lines/addr2line.* -o addr2lines/addr2line.${PID}.0
 paste <(awk '{printf("%10s %2s %8s %16s -> %18s %15s %20s\n", $1, $2, $3, $4, $9, $7, $12)}' ${LOG_FILE_PATH}) <(awk '{printf("%48s %32s %s\n", $6, $7, $8)}' addr2lines/addr2line.${PID}.0) > addr2lines/addr2line.${PID}.1
 wc -l addr2lines/addr2line.${PID}.0
 U=$(wc -l addr2lines/addr2line.${PID}.1 | awk '{print $1}')
 V=$(wc -l ${LOG_FILE_PATH} | awk '{print $1}')
-if [[ "$U" == "$V" ]];
+if [[ "${U}" == "${V}" ]];
 then
 	echo "Success"
 

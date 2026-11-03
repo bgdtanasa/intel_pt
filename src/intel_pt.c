@@ -700,8 +700,6 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   } else if (last_ip_update == 1u) {
 #if defined(AUX_DBG)
     if ((xed_is_enabled(ip) == 1u) && (ip != 0llu) && (xed_unwind_find_inst(ip) == NULL)) {
-      xed_close();
-
       print_intel_pt_bytes(x_p, n_p, n_orig);
       print_intel_pt_pkts();
       fprintf(stderr, "ip_decode error :: 0 ip_bytes = %u ip = %16llx last_ip = %16llx\n", ip_bytes, ip, last_ip); for (;;) { }
@@ -808,8 +806,6 @@ decode_again:
               n_orig - n,
               h,
               __atomic_load_n(h_p, __ATOMIC_ACQUIRE));
-
-      xed_close();
 
       print_intel_pt_bytes(x, n, n_orig);
       print_intel_pt_pkts();
@@ -1304,8 +1300,6 @@ cyc_again:
   }
 
   if (n >= 1llu) {
-    xed_close();
-
     print_intel_pt_bytes(x, n, n_orig);
     print_intel_pt_pkts();
     fprintf(stderr, "1 intel_pt_decode error\n"); for (;;) { }

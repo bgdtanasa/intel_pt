@@ -196,8 +196,7 @@ static inline __attribute__((always_inline)) void add_tip(const unsigned long lo
   }
 }
 
-static void add_inst(const unsigned char* const   inst_bytes,
-                     xed_decoded_inst_t* const    xedd,
+static void add_inst(xed_decoded_inst_t* const    xedd,
                      const char* const            binary,
                      const unsigned long long int base_addr,
                      const unsigned long long int addr) {
@@ -218,7 +217,6 @@ static void add_inst(const unsigned char* const   inst_bytes,
   insts[ no_insts ].category  = xedd_category;
   insts[ no_insts ].iclass    = xedd_iclass;
   insts[ no_insts ].length    = xedd_length;
-  memcpy(&insts[ no_insts ].inst_bytes[ 0u ], inst_bytes, xedd_length);
 
   if (xed_inst_get_attribute(xedd_dec, XED_ATTRIBUTE_FAR_XFER) == 1u) {
     insts[ no_insts ].cofi.type |= FAR_TRANSFER;
@@ -620,14 +618,6 @@ xed_decode_inst:
         if (xed_error == XED_ERROR_NONE) {
           sscanf(line, "%llx", &addr);
           addr += base_addr;
-        } else {
-#if 0
-          fprintf(stderr, "%016llx %3d :: %2u :: ", addr, xed_error, n_bytes);
-          for (unsigned int i = 0u; i < n_bytes; i++) {
-            fprintf(stderr, "%02x ", inst_bytes[ i ]);
-          }
-          fprintf(stderr, "\n");
-#endif
         }
 
         while (line[ 0u ] != ' ') {
@@ -649,18 +639,7 @@ xed_decode_inst:
         xed_decoded_inst_set_mode(&xedd, XED_MACHINE_MODE_LONG_64, XED_ADDRESS_WIDTH_64b);
         xed_error = xed_decode_with_features(&xedd, &inst_bytes[ 0u ], n_bytes, &chip_features);
         if (xed_error == XED_ERROR_NONE) {
-          char xed_buffer[ 1024u ];
-
-          memset(&xed_buffer[ 0u ], 0, sizeof(xed_buffer));
-          if (xed_format_context(XED_SYNTAX_ATT,
-                                 &xedd,
-                                 &xed_buffer[ 0u ],
-                                 ((int) (sizeof(xed_buffer))),
-                                 0,
-                                 NULL,
-                                 NULL)) {
-            add_inst(&inst_bytes[ 0u ], &xedd, xed_file, base_addr, addr);
-          }
+          add_inst(&xedd, xed_file, base_addr, addr);
         } else if (xed_error == XED_ERROR_BUFFER_TOO_SHORT) {
           goto xed_decode_inst;
         //} else if (xed_error == XED_ERROR_INVALID_FOR_CHIP) {
@@ -724,7 +703,7 @@ void parse_vmlinux(void) {
       xed_decoded_inst_set_mode(&xedd, XED_MACHINE_MODE_LONG_64, XED_ADDRESS_WIDTH_64b);
       xed_error = xed_decode_with_features(&xedd, inst_bytes, xed_max_inst_bytes, &chip_features);
       if (xed_error == XED_ERROR_NONE) {
-        add_inst(inst_bytes, &xedd, mods[ i ].name, mods[ i ].addr, mods[ i ].addr + ((unsigned long long int) (inst_bytes - inst_buffer)));
+        add_inst(&xedd, mods[ i ].name, mods[ i ].addr, mods[ i ].addr + ((unsigned long long int) (inst_bytes - inst_buffer)));
 
         inst_bytes += xed_decoded_inst_get_length(&xedd);
       } else {
@@ -957,17 +936,6 @@ void xed_process_branches(const unsigned int           tnt,
             insts[ this_ctx->last_inst ].binary,
             xed_category_enum_t2str(insts[ this_ctx->last_inst ].category),
             xed_iclass_enum_t2str(insts[ this_ctx->last_inst ].iclass));
-#if defined(PRINT_XED_OPCODE)
-    for (unsigned int j = 0u; j < 10u; j++) {
-      const size_t k = strlen(&branches_buffer[ 0u ]);
-
-      if (j < insts[ this_ctx->last_inst ].length) {
-        sprintf(&branches_buffer[ k ], " %02x", ((unsigned int) (insts[ this_ctx->last_inst ].bytes[ j ])));
-      } else {
-        sprintf(&branches_buffer[ k ], "   ");
-      }
-    }
-#endif
 #if defined(PRINT_XED_BRANCHES_ONLY)
     }
 #endif
@@ -1180,6 +1148,7 @@ void xed_process_branches(const unsigned int           tnt,
           const xed_iclass_enum_t this_iclass = insts[ this_ctx->last_inst ].iclass;
 
           if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSCALL) {
+#if 0
             this_ctx->call_stack[ this_ctx->call_stack_idx ] = (call_stack_t) {
               .call       = &insts[ this_ctx->last_inst + 0ll ],
               .t_call     = x_tip->tip,
@@ -1191,7 +1160,9 @@ void xed_process_branches(const unsigned int           tnt,
             if (this_ctx->call_stack_idx >= CALL_STACK_LEN) {
               fflush(branches_fp); fclose(branches_fp); fprintf(stderr, "Full stack\n"); for (;;) {}
             }
+#endif
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSRET) {
+#if 0
             if (this_ctx->call_stack_idx >= 1u) {
               unsigned long long int ret;
 
@@ -1216,6 +1187,7 @@ void xed_process_branches(const unsigned int           tnt,
                 }
               }
             }
+#endif
           }
           update_inst_stats(insts[ this_ctx->last_inst ].iclass);
           branches_n++;

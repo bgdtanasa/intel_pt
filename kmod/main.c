@@ -356,6 +356,38 @@ static ssize_t my_write(struct file* file, const char __user* buf, size_t count,
   return 0;
 }
 
+static void iterate_kprobe_insn_cache(struct kprobe_insn_cache* const insn_cache, unsigned long* const mods_sz) {
+  struct kprobe_insn_page {
+    struct list_head          list;
+    kprobe_opcode_t*          insns;
+    struct kprobe_insn_cache* cache;
+    int                       nused;
+    int                       ngarbage;
+    char                      slot_used[];
+  };
+
+  if (insn_cache != NULL) {
+    struct kprobe_insn_page* insn_page = NULL;
+
+    printk(KERN_INFO "KMOD :: kprobe_insn_page = %016lx", ((unsigned long) (insn_cache)));
+    mutex_lock(&insn_cache->mutex);
+    rcu_read_lock();
+    list_for_each_entry_rcu(insn_page, &insn_cache->pages, list) {
+      printk(KERN_INFO "KMOD :: insns = %016lx", ((unsigned long) (insn_page->insns)));
+
+      strcpy(&my_mods[ my_no_mods ].name[ 0u ], insn_cache->sym);
+      my_mods[ my_no_mods ].addr         = ((unsigned long) (insn_page->insns));
+      my_mods[ my_no_mods ].sz           = 4096lu;
+      my_mods[ my_no_mods ].perfing_addr = 0lu;
+
+      *mods_sz   += my_mods[ my_no_mods ].sz;
+      my_no_mods += 1u;
+    }
+    rcu_read_unlock();
+    mutex_unlock(&insn_cache->mutex);
+  }
+}
+
 static int x_init(void) {
   //my_follow_page_t my_follow_page = (my_follow_page_t) kallsyms_lookup_name("follow_page");
   //if (my_follow_page == NULL) {
@@ -369,6 +401,8 @@ static int x_init(void) {
   struct list_head* modules      = (struct list_head*) kallsyms_lookup_name("modules");
   struct module*    mod          = NULL;
   unsigned long     mods_sz      = 0lu;
+  struct kprobe_insn_cache* kprobe_insn_slots    = (struct kprobe_insn_cache*) kallsyms_lookup_name("kprobe_insn_slots");
+  struct kprobe_insn_cache* kprobe_optinsn_slots = (struct kprobe_insn_cache*) kallsyms_lookup_name("kprobe_optinsn_slots");
 
   if ((_text != 0lu) && (_end != 0lu) && (_text < _end) && (module_mutex != NULL) && (modules != NULL)) {
     unsigned int i = 0u;
@@ -385,23 +419,11 @@ static int x_init(void) {
     mods_sz    += my_mods[ 0u ].sz;
     my_no_mods += 1u;
 
-    // kprobe_insn_page
-    strcpy(&my_mods[ my_no_mods ].name[ 0u ], "kprobe_insn_page");
-    my_mods[ my_no_mods ].addr         = 0xffffffffa113d000lu;
-    my_mods[ my_no_mods ].sz           = 4096lu;
-    my_mods[ my_no_mods ].perfing_addr = 0lu;
+    // kprobe_insn_slots
+    iterate_kprobe_insn_cache(kprobe_insn_slots,    &mods_sz);
 
-    mods_sz    += my_mods[ my_no_mods ].sz;
-    my_no_mods += 1u;
-
-    // kprobe_optinsn_page
-    strcpy(&my_mods[ my_no_mods ].name[ 0u ], "kprobe_optinsn_page");
-    my_mods[ my_no_mods ].addr         = 0xffffffffa2154000lu;
-    my_mods[ my_no_mods ].sz           = 4096lu;
-    my_mods[ my_no_mods ].perfing_addr = 0lu;
-
-    mods_sz    += my_mods[ my_no_mods ].sz;
-    my_no_mods += 1u;
+    // kprobe_optinsn_slots
+    iterate_kprobe_insn_cache(kprobe_optinsn_slots, &mods_sz);
 
     // module code
     mutex_lock(module_mutex);

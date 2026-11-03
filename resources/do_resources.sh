@@ -26,61 +26,38 @@ function my_sed() {
 rm -rf objdumps/objdump.*
 rm -rf dwarfs/dwarf.*
 
+XED_KIT=xed-install-base-2025-12-04-lin-x86-64
+
 U=$(grep "r[-w]x[sp]" /proc/$1/maps | awk '{print $6}')
-
-for l in $U;
+while IFS= read -r l;
 do
-    if [[ -f $l ]];
+    if [[ -f ${l} ]];
     then
-        a=$(basename $l)
-        echo "Generating resources for $l"
+        a=$(basename "${l}")
+        echo "Generating resources for ${l} :: ${a}"
 
-        objdump -d $l | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdumps/objdump.$a
-        llvm-dwarfdump --debug-frame $l | grep "  0x" | sort -k 1 -g > dwarfs/dwarf.$a
-        my_sed dwarfs/dwarf.$a
+        #objdump -d "${l}" | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdumps/objdump.${a}
+        ../../xed/kits/${XED_KIT}/examples/obj/xed -i "${l}" | grep XDIS | awk '{
+          gsub(":", "", $2)
+          printf("%s ", $2)
+          for (i = 1; i <= length($5) - 2; i += 2) {
+            printf("%s ", substr($5, i, 2))
+          }
+          printf("%s\n", substr($5, i, 2))
+        }' > objdumps/objdump.${a}
+        llvm-dwarfdump --debug-frame "${l}" | grep "  0x" | sort -k 1 -g > dwarfs/dwarf.${a}
+        my_sed dwarfs/dwarf.${a}
+
+        if [[ ! -s "objdumps/objdump.${a}" ]];
+        then
+          echo "Resource not created :: objdumps/objdump.${a}"
+          exit -1
+        fi
+        if [[ ! -s "dwarfs/dwarf.${a}" ]];
+        then
+          echo "Resource not created :: dwarfs/dwarf.${a}"
+        fi
     else
-        echo "Invalid resource $l"
+      echo "Invalid resource ${l}"
     fi
-done
-
-if [[ $2 == "vmlinux" ]];
-then
-    rm -rf vmlinux_addrs
-    rm -rf modules_list
-    rm -rf modules_addrs
-
-    grep "[tT] " /proc/kallsyms | sort -k 1 > vmlinux_addrs
-    STEXT=$(grep _stext vmlinux_addrs | awk '{print $1}')
-    ETEXT=$(grep _etext vmlinux_addrs | awk '{print $1}')
-    START_ADDR=${STEXT}
-    STOP_ADDR=$(tail -n 1 vmlinux_addrs | awk '{print $1}')
-    echo "vmlinux ${STEXT} ${ETEXT}" >> modules_addrs
-
-    l="vmlinux"
-    a=$(basename $l)
-    echo "Generating resources for $l"
-    objdump -d --start-address=0x${START_ADDR} --stop-address=0x${STOP_ADDR} /proc/kcore | sed -n 's/^\s*\([0-9a-fA-F]*\):\s*\(\([0-9a-fA-F][0-9a-fA-F]\s\)*\).*/\1 \2/p' > objdumps/objdump.$a
-    touch dwarfs/dwarf.$a
-
-    awk '{
-        for (i = 1; i <= NF; i++) {
-            if (($i == "Live") && ((i + 1) <= NF)) {
-                if ($(i + 1) != "0x0000000000000000") {
-                    printf("%16s %s\n", $(i + 1), $1)
-                }
-                break
-            }
-        }
-    }' /proc/modules | sort -k 1 > modules_list
-
-    while read -r A M;
-    do
-        grep "\[$M\]" vmlinux_addrs > vmlinux_addrs_${M}
-
-        A=$(head -n 1 vmlinux_addrs_${M} | awk '{print $1}')
-        B=$(tail -n 1 vmlinux_addrs_${M} | awk '{print $1}')
-
-        echo "$M $A $B" >> modules_addrs
-        rm -rf vmlinux_addrs_${M}
-    done < modules_list
-fi
+done <<< "${U}"
