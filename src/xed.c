@@ -748,6 +748,7 @@ void perfed_xed(const int perfed_pid __attribute__((unused))) {
   xed_tables_init();
   xed_get_chip_features(&chip_features, XED_CHIP_ALL);
 
+  remove("branches.log");
   branches_fp = fopen("branches.log", "w");
   if (branches_fp == NULL) {
     branches_fp = stdout;

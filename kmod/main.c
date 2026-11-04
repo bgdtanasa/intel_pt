@@ -481,11 +481,6 @@ static int x_init(void) {
 
             for (unsigned long j = 0lu; j < my_mods[ i ].sz; j += 4096lu) {
               void*        pg_addr = ((void*) (my_mods[ i ].addr + j));
-
-              //if (is_vmalloc_or_module_addr(pg_addr) == 0) {
-              //  printk(KERN_INFO "vmalloc_to_page = %lx", my_mods[ i ].addr + j);
-              //}
-
               struct page* pg      = vmalloc_to_page(pg_addr);
               if (pg != NULL) {
                 long ret = remap_pfn_range(a_vma,

@@ -32,7 +32,9 @@
 #include "pmu.h"
 #endif
 #include "kmod.h"
+#if defined(EN_PTRACE_UNWIND)
 #include "x_unwind.h"
+#endif
 #if defined(EN_PTRACE_BRK)
 #include "brk.h"
 #endif
@@ -95,7 +97,7 @@
 
 #define MMAP_DATA_NO_PAGES (12llu)
 #define MMAP_SIZE          ((1llu + (1llu << (MMAP_DATA_NO_PAGES))) * (ONE_PAGE))
-#define MMAP_AUX_NO_PAGES  (16llu)
+#define MMAP_AUX_NO_PAGES  (10llu)
 #define MMAP_AUX_SIZE      ((1llu << (MMAP_AUX_NO_PAGES)) * (ONE_PAGE))
 
 #define DATA_BUFFER_SIZE (N_MB(2llu))
@@ -691,28 +693,28 @@ do_switch_util:
     fprintf(stderr, "pthread_setaffinity_np failed %s\n", strerror(ret));
   }
 
-  intel_pt_disable(perfing_fd);
-#if defined(EN_PMU)
-  pmu_close();
-#endif
   if (munmap(perf_aux_buffer, perf_metadata->aux_size) != 0) {
     fprintf(stderr, "munmap AUX failed %s\n", strerror(errno));
   }
   if (munmap(perf_metadata, MMAP_SIZE) != 0) {
     fprintf(stderr, "munmap DATA failed %s\n", strerror(errno));
   }
-  close(perfing_fd);
+  free(data_buffer);
+  free(aux_buffer);
+  intel_pt_disable(perfing_fd);
 
+  xed_close();
+#if defined(EN_PMU)
+  pmu_close();
+#endif
+  kmod_close();
 #if defined(EN_PTRACE_UNWIND)
   unwind_close();
 #endif
-  kmod_close();
 #if defined(EN_PTRACE_BRK)
   brk_close();
 #endif
-  xed_close();
-  free(data_buffer);
-  free(aux_buffer);
+
   pthread_exit(NULL);
 }
 
@@ -813,13 +815,13 @@ static void perfed_setup(void) {
                  perfing_fd,
                  perf_metadata->aux_offset);
         if (p != MAP_FAILED) {
-#if defined(EN_PTRACE_UNWIND)
-          perfed_unwind(perfed_pid);
-#endif
           perfed_xed(perfed_pid);
           perfed_proc(perfed_pid, NULL);
 #if defined(EN_PMU)
           perfed_pmu(perfed_pid, perfed_cpu, perfing_fd);
+#endif
+#if defined(EN_PTRACE_UNWIND)
+          perfed_unwind(perfed_pid);
 #endif
           perfed_msr();
 

@@ -11,8 +11,12 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
+#include <fcntl.h>
 
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
 
 #include <linux/perf_event.h>
 
@@ -64,10 +68,20 @@
 #define PRINT_PT
 #endif
 #if 1
-#define AUX_DBG
+#define INTEL_PT_DBG
+#endif
+#if !defined(EN_INTEL_PT_ONLINE)
+#if defined(INTEL_PT_DBG)
+#warning un-define INTEL_PT_DBG
+#undef INTEL_PT_DBG
+#endif
 #endif
 
 #define INTEL_PT_PKT_HISTORY (8192u)
+
+#if !defined(EN_INTEL_PT_ONLINE)
+static FILE* intel_pt_fp = NULL;
+#endif
 
 typedef enum {
   INTEL_PT_PKT_NONE,
@@ -134,7 +148,7 @@ typedef struct {
   double                   tsc_approx;
   unsigned char            ip_bytes;
 
-#if defined(AUX_DBG)
+#if defined(INTEL_PT_DBG)
   const volatile unsigned char* x;
   unsigned char                 y;
   unsigned long long int        n;
@@ -378,7 +392,7 @@ static void print_intel_pt_pkts(void) {
     if (intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_NONE) {
       return;
     } else {
-#if defined(AUX_DBG)
+#if defined(INTEL_PT_DBG)
       fprintf(stdout,
               "%4u %u " PRINT_FORMAT "%16llx %20llu %20.2lf :: %16llx %02x %02x %12llu\n",
               j,
@@ -426,7 +440,7 @@ static const intel_pt_pkt_t* prev_intel_pt_pkt(const intel_pt_pkt_type_t type) {
 static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
                                 unsigned long long int        val,
                                 const unsigned long long int  cyc_cnt,
-#if defined(AUX_DBG)
+#if defined(INTEL_PT_DBG)
                                 const volatile unsigned char* x,
                                 unsigned long long int        n) {
 #else
@@ -560,7 +574,7 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
     },
     .cyc_cnt    = (a == 1u) ? (cyc_cnt)        : (0llu),
     .tsc_approx = (a == 1u) ? (tsc_approx_ref) : (0llu),
-#if defined(AUX_DBG)
+#if defined(INTEL_PT_DBG)
     .x          = x,
     .y          = *x,
     .n          = n
@@ -576,11 +590,7 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
 
 static unsigned long long int ip_decode(const volatile unsigned char** x,
                                         unsigned long long int*        n,
-#if defined(AUX_DBG)
                                         const unsigned long long int   n_orig,
-#else
-                                        const unsigned long long int   n_orig __attribute__((unused)),
-#endif
                                         const intel_pt_pkt_type_t      pkt_type) {
   const volatile unsigned char* x_p = *x;
   unsigned long long int        n_p = *n;
@@ -698,13 +708,11 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   }
   if (last_ip_update == 0u) {
   } else if (last_ip_update == 1u) {
-#if defined(AUX_DBG)
     if ((xed_is_enabled(ip) == 1u) && (ip != 0llu) && (xed_unwind_find_inst(ip) == NULL)) {
       print_intel_pt_bytes(x_p, n_p, n_orig);
       print_intel_pt_pkts();
       fprintf(stderr, "ip_decode error :: 0 ip_bytes = %u ip = %16llx last_ip = %16llx\n", ip_bytes, ip, last_ip); for (;;) { }
     }
-#endif
     last_intel_pt_pkt->v.ip = ip;
 
     last_ip = ip;
@@ -765,16 +773,16 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   return ip;
 }
 
-unsigned long long int intel_pt_decode(const volatile unsigned char*    x,
-                                       unsigned long long int           n,
-#if defined(AUX_DBG)
-                                       const unsigned long long int     h,
-                                       volatile unsigned long long int* h_p) {
+static unsigned long long int intel_pt_decode_online(const volatile unsigned char*    x,
+                                                     unsigned long long int           n,
+#if defined(INTEL_PT_DBG)
+                                                     const unsigned long long int     h,
+                                                     volatile unsigned long long int* h_p) {
 #else
-                                       const unsigned long long int     h __attribute__((unused)),
-                                       volatile unsigned long long int* h_p __attribute__((unused))) {
+                                                     const unsigned long long int     h __attribute__((unused)),
+                                                     volatile unsigned long long int* h_p __attribute__((unused))) {
 #endif
-#if defined(AUX_DBG)
+#if defined(INTEL_PT_DBG)
   const volatile unsigned char* x_orig = x;
 #endif
   const unsigned long long int  n_orig = n;
@@ -783,14 +791,9 @@ unsigned long long int intel_pt_decode(const volatile unsigned char*    x,
   const volatile unsigned short int* x_16;
   const volatile unsigned char*      x_8;
 
-  //for (unsigned long long int i = 0llu; i < n; i++) {
-  //  fprintf(stdout, "%02x ", ((unsigned int) (x[ i ])));
-  //}
-  //fprintf(stdout, "\n");
-
 decode_again:
   if (n >= 1llu) {
-#if defined(AUX_DBG)
+#if defined(INTEL_PT_DBG)
     if ((last_intel_pt_pkt != NULL) && (last_intel_pt_pkt->type != INTEL_PT_PKT_NONE) && (last_intel_pt_pkt->x != NULL) && (*last_intel_pt_pkt->x != last_intel_pt_pkt->y)) {
       fprintf(stdout,
               "%4u " PRINT_FORMAT "%16llx %20llu :: %16llx %02x %02x %12llu :: %12llu %12llu :: %12llu %12llu\n",
@@ -816,7 +819,6 @@ decode_again:
     x_32 = ((volatile unsigned int*) (x));
     x_16 = ((volatile unsigned short int*) (x));
     x_8  = ((volatile unsigned char*) (x));
-    //fprintf(stdout, "n = %12llu\n", n);
 
     if ((n >= 4llu) && (*x_32 == PSB)) {
       last_ip = 0llu;
@@ -1308,9 +1310,43 @@ cyc_again:
   return n;
 }
 
+#if !defined(EN_INTEL_PT_ONLINE)
+static unsigned long long int intel_pt_decode_offline(const volatile unsigned char* x,
+                                                      unsigned long long int        n) {
+  if (fwrite(((void*) (x)), ((size_t) (n)), 1, intel_pt_fp) != 1) {
+    fprintf(stderr, "fwrite failure\n"); for (;;) {}
+  }
+
+  return 0llu;
+}
+#endif
+
+unsigned long long int intel_pt_decode(const volatile unsigned char*    x,
+                                       unsigned long long int           n,
+                                       const unsigned long long int     h,
+                                       volatile unsigned long long int* h_p) {
+#if defined(EN_INTEL_PT_ONLINE)
+  return intel_pt_decode_online(x, n, h, h_p);
+#else
+  (void) (h);
+  (void) (h_p);
+
+  return intel_pt_decode_offline(x, n);
+#endif
+}
+
 void intel_pt_enable(const int intel_pt_fd) {
   if (ioctl(intel_pt_fd, PERF_EVENT_IOC_ENABLE, 0) == 0) {
     intel_pt_status = INTEL_PT_STATUS_ENABLE;
+
+#if !defined(EN_INTEL_PT_ONLINE)
+    remove("intel_pt.bin");
+    intel_pt_fp = fopen("intel_pt.bin", "w+");
+    if (intel_pt_fp != NULL) {
+    } else {
+      fprintf(stderr, "fopen %s\n", strerror(errno)); for (;;) {}
+    }
+#endif
   }
 }
 
@@ -1318,4 +1354,30 @@ void intel_pt_disable(const int intel_pt_fd) {
   if (ioctl(intel_pt_fd, PERF_EVENT_IOC_DISABLE, 0) == 0) {
     intel_pt_status = INTEL_PT_STATUS_DISABLE;
   }
+
+#if !defined(EN_INTEL_PT_ONLINE)
+  if (intel_pt_fp != NULL) {
+    struct stat stat = { 0 };
+
+    fflush(intel_pt_fp); fsync(fileno(intel_pt_fp));
+    if (fstat(fileno(intel_pt_fp), &stat) == 0) {
+      void*                        p    = NULL;
+      const unsigned long long int p_sz = (((unsigned long long int) (stat.st_size)) + 4095llu) & ~4095llu;
+
+      fprintf(stdout, "intel_pt.bin mmap size = %llu MB\n", p_sz / 1024llu / 1024llu);
+      if (p_sz != 0llu) {
+        p = mmap(NULL, ((size_t) (p_sz)), PROT_READ | PROT_WRITE, MAP_PRIVATE, fileno(intel_pt_fp), 0);
+        if (p != MAP_FAILED) {
+          intel_pt_decode_online(((const volatile unsigned char*) (p)), ((unsigned long long int) (stat.st_size)), 0llu, NULL);
+
+          munmap(p, ((size_t) (p_sz)));
+        } else {
+          fprintf(stderr, "intel_pt.bin mmap error = %s\n", strerror(errno)); for (;;) {}
+        }
+      }
+    }
+    fclose(intel_pt_fp); intel_pt_fp = NULL;
+  }
+#endif
+  close(intel_pt_fd);
 }

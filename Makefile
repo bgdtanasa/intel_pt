@@ -34,6 +34,7 @@ CPP_FLAGS+=-DEN_VMLINUX_WIDE
 #CPP_FLAGS+=-DEN_PTRACE_UNWIND
 #CPP_FLAGS+=-DEN_PTRACE_BRK
 #CPP_FLAGS+=-DEN_SW_UTIL
+#CPP_FLAGS+=-DEN_INTEL_PT_ONLINE
 
 $(info $(GREEN))
 ifneq ($(filter -DEN_PMU, $(CPP_FLAGS)), )
@@ -56,6 +57,11 @@ endif
 
 ifneq ($(filter -DEN_RET_COMPRESSION, $(CPP_FLAGS)), )
 $(info -DEN_RET_COMPRESSION is set in CPP_FLAGS)
+endif
+ifneq ($(filter -DEN_INTEL_PT_ONLINE, $(CPP_FLAGS)), )
+$(info -DEN_INTEL_PT_ONLINE is set in CPP_FLAGS)
+else
+$(info -DEN_INTEL_PT_ONLINE is not set in CPP_FLAGS)
 endif
 $(info $(RESET))
 

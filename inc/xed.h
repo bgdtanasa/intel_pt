@@ -15,7 +15,7 @@
 
 #include <sys/user.h>
 
-#if 0
+#if 1
 #define PRINT_XED
 #else
 #if 0
