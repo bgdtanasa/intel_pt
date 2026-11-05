@@ -334,7 +334,7 @@ static void print_call_stack(FILE* const fp) {
   for (signed int i = ((signed int) (ctx_idx)); i >= 0; i--) {
     for (signed int j = ((signed int) (ctx[ i ].call_stack_idx - 1u)); j >= 0 ; j--) {
       fprintf(fp,
-              "%2d/%2d :: %16llx -> %16llx -> %16llx :: %20.2lf %20.2lf :: %u\n",
+              "%2d/%2d :: C = %16llx T = %16llx R = %16llx :: TSC_C = %20.2lf TSC_R = %20.2lf :: %u\n",
               j,
               i,
               ctx[ i ].call_stack[ j ].call->addr,

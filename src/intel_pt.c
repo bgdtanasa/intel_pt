@@ -63,10 +63,10 @@
 #define CYC_MASK       (0x03u)
 #define SHORT_TNT_MASK (0x01u)
 
-#define PRINT_FORMAT "%10s :: "
 #if 0
-#define PRINT_PT
+#define INTEL_PT_PRINT
 #endif
+#define INTEL_PT_PRINT_FMT "%10s :: "
 #if 1
 #define INTEL_PT_DBG
 #endif
@@ -394,7 +394,7 @@ static void print_intel_pt_pkts(void) {
     } else {
 #if defined(INTEL_PT_DBG)
       fprintf(stdout,
-              "%4u %u " PRINT_FORMAT "%16llx %20llu %20.2lf :: %16llx %02x %02x %12llu\n",
+              "%4u %u " INTEL_PT_PRINT_FMT "%16llx %20llu %20.2lf :: %16llx %02x %02x %12llu\n",
               j,
               intel_pt_pkt_hist[ j ].ip_bytes,
               intel_pt_pkt_names[ intel_pt_pkt_hist[ j ].type ],
@@ -407,7 +407,7 @@ static void print_intel_pt_pkts(void) {
               intel_pt_pkt_hist[ j ].n);
 #else
       fprintf(stdout,
-              "%4u %u " PRINT_FORMAT "%16llx %20llu %20.2lf\n",
+              "%4u %u " INTEL_PT_PRINT_FMT "%16llx %20llu %20.2lf\n",
               j,
               intel_pt_pkt_hist[ j ].ip_bytes,
               intel_pt_pkt_names[ intel_pt_pkt_hist[ j ].type ],
@@ -459,7 +459,7 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
         break;
       } else if ((intel_pt_pkt_hist[ j ].type == INTEL_PT_PKT_MTC) && (intel_pt_pkt_hist[ j ].v.ctc == val)) {
         if (intel_pt_pkt_hist[ j ].tsc_approx > tsc_ref) {
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
           fprintf(stdout, "\e[0;31mTSC_REAL_ERR  = %20.2lf\e[0m\n", tsc_ref - intel_pt_pkt_hist[ j ].tsc_approx);
 #endif
 
@@ -519,7 +519,7 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
     tsc_approx_ref_prev = tsc_approx_ref;
 
     if ((type == INTEL_PT_PKT_TSC) && (tsc_approx_err < 0.0)) {
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
       fprintf(stdout, "\e[0;31mTSC_REAL_ERR  = %20.2lf\e[0m\n", tsc_approx_err);
 #endif
 
@@ -554,9 +554,9 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
   }
 #endif
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
   fprintf(stdout,
-          PRINT_FORMAT "%5u %16.2lf %16llu %20.2lf :: %16llu :: %16llx \e[0;31m%8.2lf\e[0m\n",
+          INTEL_PT_PRINT_FMT "%5u %16.2lf %16llu %20.2lf :: %16llu :: %16llx \e[0;31m%8.2lf\e[0m\n",
           intel_pt_pkt_names[ type ],
           intel_pt_pkt_hist_idx,
           ((a == 1u) && (tsc_approx_en == 1u)) ? (tsc_approx_ctc) : (0.0),
@@ -722,7 +722,7 @@ static unsigned long long int ip_decode(const volatile unsigned char** x,
   *x = x_p;
   *n = n_p;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
   fprintf(stdout, "IP            = %20llx\n", ip);
 #endif
   if (ip != 0llu) {
@@ -796,7 +796,7 @@ decode_again:
 #if defined(INTEL_PT_DBG)
     if ((last_intel_pt_pkt != NULL) && (last_intel_pt_pkt->type != INTEL_PT_PKT_NONE) && (last_intel_pt_pkt->x != NULL) && (*last_intel_pt_pkt->x != last_intel_pt_pkt->y)) {
       fprintf(stdout,
-              "%4u " PRINT_FORMAT "%16llx %20llu :: %16llx %02x %02x %12llu :: %12llu %12llu :: %12llu %12llu\n",
+              "%4u " INTEL_PT_PRINT_FMT "%16llx %20llu :: %16llx %02x %02x %12llu :: %12llu %12llu :: %12llu %12llu\n",
               (INTEL_PT_PKT_HISTORY + intel_pt_pkt_hist_idx - 1u) % INTEL_PT_PKT_HISTORY,
               intel_pt_pkt_names[ last_intel_pt_pkt->type ],
               last_intel_pt_pkt->v.val,
@@ -856,7 +856,7 @@ decode_again:
 
       last_bep_fup = 0u;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
       fprintf(stdout, "     OVF      = %20u\n", 0u);
 #endif
 
@@ -882,7 +882,7 @@ decode_again:
       goto decode_again;
     }
     if ((n >= 8llu) && (*x_16 == LONG_TNT)) {
-//#if defined(PRINT_PT)
+//#if defined(INTEL_PT_PRINT)
       fprintf(stdout, "LONG_TNT      = %20u\n", 0u); for (;;) { }
 //#endif
 
@@ -920,7 +920,7 @@ decode_again:
           tsc_ref_fc      = fc;
           tsc_ref_cyc_cnt = pkt->cyc_cnt;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
           fprintf(stdout, "FC            = %20llx\n", tsc_ref_fc);
           fprintf(stdout, "FC CYC_CNT    = %20llx\n", tsc_ref_cyc_cnt);
 #endif
@@ -953,7 +953,7 @@ decode_again:
         fprintf(stderr, "BBP SZ        = %20u\n", last_bbp_sz); for (;;) { }
       }
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
       fprintf(stdout, "BBP TYPE      = %20u\n", last_bbp_type);
       fprintf(stdout, "BBP SZ        = %20u\n", last_bbp_sz);
 #endif
@@ -977,7 +977,7 @@ decode_again:
                                          (((unsigned long long int) (x[ 3u ])) << 12llu) |
                                          (((unsigned long long int) (x[ 2u ])) <<  4llu);
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
       fprintf(stdout, "PIP           = %20llx\n", pgd);
 #endif
 
@@ -1010,7 +1010,7 @@ decode_again:
       last_cfe_type = (((unsigned int) (x[ 2u ])) >> 0u) & 0x1Fu;
       last_cfe_vct  = ((unsigned int) (x[ 3u ]));
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
       fprintf(stdout, "CFE FUP       = %20x\n", last_cfe_fup);
       fprintf(stdout, "CFE TYPE      = %20x\n", last_cfe_type);
       fprintf(stdout, "CFE VECTOR    = %20x\n", last_cfe_vct);
@@ -1027,7 +1027,7 @@ decode_again:
       base_factor = ((double) (base_hz)) / 1e9;
       cbr_factor  = ((double) (cbr * bus_hz)) / 1e9;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
       fprintf(stdout, "CBR           = %20.2lf GHz\n", ((double) (cbr_factor)));
       fprintf(stdout, "1_MTC_TO_CYCS = %20.2lf\n", ((double) (tsc_ratio)) * (cbr_factor / tsc_factor));
 #endif
@@ -1050,7 +1050,7 @@ decode_again:
       last_bbp_type = 0xFFFFFFFFu;
       last_bbp_sz   = 0u;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
       fprintf(stdout, "BEP FUP       = %20u\n", last_bep_fup);
 #endif
 
@@ -1084,7 +1084,7 @@ decode_again:
         fprintf(stderr, "MODE error %u\n", leaf_id); print_intel_pt_pkts(); for (;;) {}
       }
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
       if (leaf_id == 0u) {
         fprintf(stdout, "MODE_EXEC     = %20u\n", leaf_id);
       } else {
@@ -1120,7 +1120,7 @@ decode_again:
       tsc_ref_fc      = 0llu;
       tsc_ref_cyc_cnt = cyc_cnt_ref;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
       fprintf(stdout, "TSC           = %20.2lf\n", ((double) (tsc)));
 #endif
 
@@ -1140,7 +1140,7 @@ decode_again:
       const unsigned long long int fup = ip_decode(&x, &n, n_orig, INTEL_PT_PKT_FUP);
 
       if (last_bep_fup == 1u) {
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
         fprintf(stdout, "FUP BEP       = %20llx\n", fup);
 #endif
 
@@ -1158,7 +1158,7 @@ decode_again:
         last_intel_pt_pkt->type = INTEL_PT_PKT_FUP_BEP;
       }
       if (last_ptw_fup == 1u) {
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
         fprintf(stdout, "FUP PTW       = %20llx\n", fup);
 #endif
 
@@ -1196,19 +1196,19 @@ decode_again:
         if (bip_id == 0x00u) {
           bip_ip = bip_payload;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
           fprintf(stdout, "BIP IP        = %20llx\n", bip_payload);
 #endif
         } else if (bip_id == 0x01u) {
           bip_pmu_mask = bip_payload;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
           fprintf(stdout, "BIP PMU       = %20llx\n", bip_payload);
 #endif
         } else if (bip_id == 0x02u) {
           bip_tsc = bip_payload;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
           fprintf(stdout, "BIP TSC       = %20.2lf\n", ((double) (bip_payload)));
 #endif
         }
@@ -1216,25 +1216,25 @@ decode_again:
         if (bip_id == 0x00u) {
           bip_mem_access_addr = bip_payload;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
           fprintf(stdout, "BIP MEM ADDR  = %20llx\n", bip_payload);
 #endif
         } else if (bip_id == 0x01u) {
           bip_mem_aux_info = bip_payload;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
           fprintf(stdout, "BIP MEM AUX   = %20llx\n", bip_payload);
 #endif
         } else if (bip_id == 0x02u) {
           bip_mem_access_lat = bip_payload;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
           fprintf(stdout, "BIP MEM LAT   = %20llx\n", bip_payload);
 #endif
         } else if (bip_id == 0x03u) {
           bip_tsx_aux_info = bip_payload;
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
           fprintf(stdout, "BIP TSX AUX   = %20llx\n", bip_payload);
 #endif
         }
@@ -1288,7 +1288,7 @@ cyc_again:
                            tsc_approx_ref,
                            cyc_cnt_ref);
 
-#if defined(PRINT_PT)
+#if defined(INTEL_PT_PRINT)
       fprintf(stdout,
               "SHORT_TNT     = %20x %3u\n",
               (short_tnt >> 1u) & ((1u << (p_one - 1u)) - 1u),

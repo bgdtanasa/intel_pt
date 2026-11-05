@@ -498,12 +498,14 @@ static void* perfing_main(void* args __attribute__((unused))) {
                         unwind_insts->attach_tsc = perfed_attach_tsc;
                         unwind_insts->detach_tsc = perfed_detach_tsc;
 
+#if defined(PRINT_RECORD)
                         fprintf(stdout,
                                 "attach = %12.2lf us :: %6u %6u :: \e[0;31m%12.5lf\e[0m\n",
                                 ((double) (perfed_detach_tsc - perfed_attach_tsc)) * tsc_hz_ns / 1000.0,
                                 unwind_queue_tail,
                                 unwind_queue_head,
                                 aux_util);
+#endif
                       }
                     }
                   } else {
