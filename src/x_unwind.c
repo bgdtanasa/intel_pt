@@ -17,9 +17,6 @@ unwind_insts_t* unwind_queue;
 unsigned int    unwind_queue_head;
 unsigned int    unwind_queue_tail;
 
-extern char   perfed_name[ ];
-extern double tsc_hz_ns;
-
 void perfed_unwind(const int perfed_pid __attribute__((unused))) {
   unwind_queue = (unwind_insts_t*) malloc(UNWIND_QUEUE_LEN * sizeof(unwind_insts_t));
   if (unwind_queue == NULL) {
@@ -55,7 +52,6 @@ unwind_insts_t* unwind(const int                            perfed_pid,
   cfa_regs[ 15u ] = ((unsigned long long int) (uregs->r15));
   cfa_regs[ 16u ] = ((unsigned long long int) (uregs->rip));
 
-  kmod_redo_kmaps();
 unwind_again:
   if (cfa_regs[ 16u ] == 0llu) {
     return NULL;
@@ -93,7 +89,7 @@ unwind_again:
 
         case REG_RULE_CFA: {
           const unsigned long long int perfed_x  = cfa + dwarf_unwind->regs[ i ].u.cfa;
-          unsigned long long int       perfing_x = kmod_find_addr(perfed_x);
+          unsigned long long int       perfing_x = kmod_find_stk_addr(perfed_x);
 
           if (perfing_x != 0llu) {
             cfa_regs[ i ] = *((unsigned long long int*) (perfing_x));
@@ -169,43 +165,6 @@ unsigned int drop_unwinds(const double a, const double b) {
   }
 
   return n;
-}
-
-void print_unwind(FILE* const fp) {
-  unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
-  const double          attach_tsc   = ((double) (unwind_insts->attach_tsc));
-
-  if (unwind_insts->no_insts >= 1u) {
-    fprintf(stdout, "Printing unwind at %20.2lf %20.2lf %20.2lf :: %6u %6u\n", 0.0, attach_tsc, 0.0, unwind_queue_tail, unwind_queue_head);
-
-    fprintf(fp, "AT :: %20.2lf\n", ((double) (unwind_insts->attach_tsc)));
-
-    fprintf(fp,
-            "%s\t%d [%03d] %20.2lf: cpu-clock: %6u %6u\n",
-            &perfed_name[ 0u ],
-            0,
-            0,
-            0.0,
-            unwind_queue_tail,
-            unwind_queue_head);
-    for (unsigned int i = 0u; i < unwind_insts->no_insts; i++) {
-      const inst_t* const inst = unwind_insts->insts[ i ];
-
-      fprintf(fp,
-              "\t%16llx %08llx_%s ([%s %016llx])\n",
-              inst->addr,
-              inst->addr - inst->base_addr,
-              inst->binary,
-              inst->binary,
-              inst->dwarf_unwind->addr - inst->dwarf_unwind->base_addr);
-    }
-    fprintf(fp, "\n");
-
-    fprintf(fp, "DT :: %20.2lf\n", ((double) (unwind_insts->detach_tsc)));
-
-    memset(unwind_insts, 0, sizeof(unwind_insts_t));
-    unwind_queue_tail = (unwind_queue_tail + 1u) % UNWIND_QUEUE_LEN;
-  }
 }
 
 void unwind_close(void) {

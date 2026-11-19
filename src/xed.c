@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <limits.h>
 
 #include <sys/types.h>
 
@@ -137,9 +138,9 @@ static xed_chip_features_t chip_features;
 static inst_stats_t        inst_stats;
 
 #if defined(EN_VMLINUX)
-static const inst_t* unwind_cache_high[ CACHE_LENGTH ];
+static const inst_t* unwind_cache_ks[ CACHE_LENGTH ];
 #endif
-static const inst_t* unwind_cache_low[ CACHE_LENGTH ];
+static const inst_t* unwind_cache_us[ CACHE_LENGTH ];
 
 extern double tsc_hz_ns;
 extern double tsc_factor;
@@ -441,19 +442,19 @@ const char* parse_get_binary(const char* const xed_file, const unsigned int add_
 void parse_dwarf(const char* const xed_file, const unsigned long long int base_addr) {
   char dwarf_file[ 256u ];
 
+  if (xed_file == NULL) {
+    return;
+  }
+  if (strstr(xed_file, "anon") != NULL) {
+    return;
+  }
   if (strstr(xed_file, "stack") != NULL) {
-    fprintf(stdout, "\n");
     return;
   }
   if (strstr(xed_file, "vsyscall") != NULL) {
-    fprintf(stdout, "\n");
     return;
   }
-
-  dwarf_file[ 0u ] = '\0';
-  if (xed_file != NULL) {
-    sprintf(&dwarf_file[ 0u ], "resources/dwarfs/dwarf.%s", xed_file);
-  }
+  sprintf(&dwarf_file[ 0u ], "resources/dwarfs/dwarf.%s", xed_file);
 
   FILE* const fp = fopen(dwarf_file, "r");
   if (fp != NULL) {
@@ -565,8 +566,6 @@ reg_again:
       }
     }
 
-    fprintf(stdout, "no_dwarf_unwinds = %9llu :: ", no_dwarf_unwinds);
-    fprintf(stdout, "no_binaries = %9u :: ", no_binaries);
     fclose(fp);
   } else {
     fprintf(stderr,
@@ -577,97 +576,77 @@ reg_again:
 }
 #endif
 
-void parse_objdump(const int perfed_pid __attribute__((unused)), const char* const xed_file, const unsigned long long int base_addr) {
-  char obj_file[ 256u ];
+void parse_objdump(const int                    perfed_pid __attribute__((unused)),
+                   const char* const            xed_file,
+                   const unsigned long long int base_addr) {
+  const mapping_t* mapping = NULL;
 
   if (xed_file == NULL) {
     return;
   }
 
-  if (strstr(xed_file, "stack") != NULL) {
-    return;
+  for (unsigned int i = 0u; i < no_us_mappings; i++) {
+    if (strstr(&us_mappings[ i ].name[ 0u ], xed_file) != NULL) {
+      mapping = &us_mappings[ i ];
+      break;
+    }
   }
-  if (strstr(xed_file, "vsyscall") != NULL) {
-    return;
-  }
+  if (mapping != NULL) {
+    unsigned char* inst_buffer     = ((unsigned char*) (mapping->perfing_addr));
+    unsigned int   inst_buffer_len = ((unsigned int) (mapping->sz));
+    unsigned char* inst_bytes      = inst_buffer;
 
-  obj_file[ 0u ] = '\0';
-  sprintf(&obj_file[ 0u ], "resources/objdumps/objdump.%s", xed_file);
+    xed_decoded_inst_t xedd;
+    xed_error_enum_t   xed_error;
 
-  FILE* const fp = fopen(obj_file, "r");
-  if (fp != NULL) {
-    char buffer[ 256u ];
+#if defined(EN_PTRACE_UNWIND)
+    fprintf(stdout,
+            "%32s :: %16lx %16lx %8lu :: no_binaries = %9u no_insts = %9llu no_dwarf_unwinds = %9llu\n",
+            &mapping->name[ 0u ],
+            mapping->addr,
+            mapping->perfing_addr,
+            mapping->sz,
+            no_binaries,
+            no_insts,
+            no_dwarf_unwinds);
+#else
+    fprintf(stdout,
+            "%32s :: %16lx %16lx %8lu :: no_binaries = %9u no_insts = %9llu\n",
+            &mapping->name[ 0u ],
+            mapping->addr,
+            mapping->perfing_addr,
+            mapping->sz,
+            no_binaries,
+            no_insts);
+#endif
 
     for (;;) {
-      xed_uint8_t            inst_bytes[ XED_MAX_INSTRUCTION_BYTES ];
-      unsigned int           n_bytes;
-      unsigned int           byte;
-      xed_decoded_inst_t     xedd;
-      xed_error_enum_t       xed_error;
-      unsigned long long int addr;
-      const char*            line;
+      unsigned int xed_max_inst_bytes = ((unsigned int) (&inst_buffer[ inst_buffer_len ] - inst_bytes));
 
-      memset(&inst_bytes[ 0u ], 0, sizeof(inst_bytes));
-      n_bytes   = 0u;
-      xed_error = XED_ERROR_NONE;
-      addr      = 0llu;
+      if (xed_max_inst_bytes >= XED_MAX_INSTRUCTION_BYTES) {
+        xed_max_inst_bytes = XED_MAX_INSTRUCTION_BYTES;
+      }
 
-xed_decode_inst:
-      line      = fgets(&buffer[ 0u ], ((int) (sizeof(buffer))), fp);
-      if (line != NULL) {
-        if (xed_error == XED_ERROR_NONE) {
-          sscanf(line, "%llx", &addr);
-          addr += base_addr;
-        }
+      xed_decoded_inst_zero(&xedd);
+      xed_decoded_inst_set_mode(&xedd, XED_MACHINE_MODE_LONG_64, XED_ADDRESS_WIDTH_64b);
+      xed_error = xed_decode_with_features(&xedd, inst_bytes, xed_max_inst_bytes, &chip_features);
+      if (xed_error == XED_ERROR_NONE) {
+        add_inst(&xedd, mapping->name, base_addr, mapping->addr + ((unsigned long long int) (inst_bytes - inst_buffer)));
 
-        while (line[ 0u ] != ' ') {
-          line++;
-        }
-        line++;
-        for (; n_bytes < XED_MAX_INSTRUCTION_BYTES;) {
-          sscanf(line, "%02x", &byte);
-          inst_bytes[ n_bytes ] = ((xed_uint8_t) (byte));
-          n_bytes++;
-
-          line += 3;
-          if (line[ 0u ] == '\n') {
-            break;
-          }
-        }
-
-        xed_decoded_inst_zero(&xedd);
-        xed_decoded_inst_set_mode(&xedd, XED_MACHINE_MODE_LONG_64, XED_ADDRESS_WIDTH_64b);
-        xed_error = xed_decode_with_features(&xedd, &inst_bytes[ 0u ], n_bytes, &chip_features);
-        if (xed_error == XED_ERROR_NONE) {
-          add_inst(&xedd, xed_file, base_addr, addr);
-        } else if (xed_error == XED_ERROR_BUFFER_TOO_SHORT) {
-          goto xed_decode_inst;
-        //} else if (xed_error == XED_ERROR_INVALID_FOR_CHIP) {
-        // ?!?!
-        //} else if (xed_error == XED_ERROR_INSTR_TOO_LONG) {
-        // ?!?!
-        } else {
-#if 0
-          fprintf(stderr, "%016llx %3d :: %2u :: ", addr - base_addr, xed_error, n_bytes);
-          for (unsigned int i = 0u; i < n_bytes; i++) {
-            fprintf(stderr, "%02x ", inst_bytes[ i ]);
-          }
-          fprintf(stderr, "\n");
-#endif
-        }
+        inst_bytes += xed_decoded_inst_get_length(&xedd);
       } else {
+        inst_bytes += 1;
+      }
+
+      if (inst_bytes >= &inst_buffer[ inst_buffer_len ]) {
+        break;
+      }
+      if (no_insts >= MAX_NO_INSTS) {
         break;
       }
     }
-
-    fprintf(stdout, "no_insts = %9llu\n", no_insts);
-    fclose(fp);
   } else {
-    fprintf(stdout, "\n");
-    fprintf(stderr,
-            "fopen(%s) failed :: %s\n",
-            obj_file,
-            strerror(errno)); for (;;) {}
+    fprintf(stderr, "Unknown xed_file %s\n", xed_file); for (;;) {}
   }
 }
 
@@ -675,9 +654,9 @@ xed_decode_inst:
 void parse_vmlinux(void) {
   fprintf(stdout, "====== KERNEL ======\n");
   no_insts_vmlinux = no_insts;
-  for (unsigned long i = 0lu; i < no_mods; i++) {
-    unsigned char* inst_buffer     = ((unsigned char*) (mods[ i ].perfing_addr));
-    unsigned int   inst_buffer_len = ((unsigned int) (mods[ i ].sz));
+  for (unsigned long i = 0lu; i < no_ks_mappings; i++) {
+    unsigned char* inst_buffer     = ((unsigned char*) (ks_mappings[ i ].perfing_addr));
+    unsigned int   inst_buffer_len = ((unsigned int) (ks_mappings[ i ].sz));
     unsigned char* inst_bytes      = inst_buffer;
 
     xed_decoded_inst_t xedd;
@@ -685,10 +664,10 @@ void parse_vmlinux(void) {
 
     fprintf(stdout,
             "%32s :: %16lx %16lx %8lu :: no_binaries = %9u no_insts = %9llu\n",
-            &mods[ i ].name[ 0u ],
-            mods[ i ].addr,
-            mods[ i ].perfing_addr,
-            mods[ i ].sz,
+            &ks_mappings[ i ].name[ 0u ],
+            ks_mappings[ i ].addr,
+            ks_mappings[ i ].perfing_addr,
+            ks_mappings[ i ].sz,
             no_binaries,
             no_insts);
 
@@ -703,7 +682,7 @@ void parse_vmlinux(void) {
       xed_decoded_inst_set_mode(&xedd, XED_MACHINE_MODE_LONG_64, XED_ADDRESS_WIDTH_64b);
       xed_error = xed_decode_with_features(&xedd, inst_bytes, xed_max_inst_bytes, &chip_features);
       if (xed_error == XED_ERROR_NONE) {
-        add_inst(&xedd, mods[ i ].name, mods[ i ].addr, mods[ i ].addr + ((unsigned long long int) (inst_bytes - inst_buffer)));
+        add_inst(&xedd, ks_mappings[ i ].name, ks_mappings[ i ].addr, ks_mappings[ i ].addr + ((unsigned long long int) (inst_bytes - inst_buffer)));
 
         inst_bytes += xed_decoded_inst_get_length(&xedd);
       } else {
@@ -874,27 +853,6 @@ void xed_update_last_inst(const unsigned long long addr) {
     if (xed_is_enabled(addr) == 0u) {
       fprintf(branches_fp, "PGD :: %16llx %16lx :: %16llx\n", this_pgd, perfed_pgd, addr);
       return;
-    }
-
-#if defined(EN_VMLINUX)
-    if ((vm_kernel_ks <= addr) && (addr < vm_kernel_me)) {
-      for (unsigned long i = 0lu; i < no_mods; i++) {
-        const unsigned long long int a = ((unsigned long long int) (mods[ i ].addr));
-        const unsigned long long int b = a + ((unsigned long long int) (mods[ i ].sz));
-
-        if ((a <= addr) && (addr < b)) {
-          fprintf(stdout, "XED Instruction %16llx found in module %s range %16llx - %16llx\n", addr, mods[ i ].name, a, b); for (;;) {}
-          return;
-        }
-      }
-    }
-#endif
-
-    for (unsigned int i = 0u; i < no_amaps; i++) {
-      if ((amaps[ i ].a <= addr) && (addr < amaps[ i ].b)) {
-        fprintf(stdout, "XED Instruction %16llx found in anonymous mapping %16llx %16llx\n", addr, amaps[ i ].a, amaps[ i ].b);
-        return;
-      }
     }
 
     fprintf(stderr, "XED Instruction %16llx not found\n", addr); for (;;) {}
@@ -1149,7 +1107,7 @@ void xed_process_branches(const unsigned int           tnt,
           const xed_iclass_enum_t this_iclass = insts[ this_ctx->last_inst ].iclass;
 
           if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSCALL) {
-#if 0
+#if 1
             this_ctx->call_stack[ this_ctx->call_stack_idx ] = (call_stack_t) {
               .call       = &insts[ this_ctx->last_inst + 0ll ],
               .t_call     = x_tip->tip,
@@ -1163,7 +1121,7 @@ void xed_process_branches(const unsigned int           tnt,
             }
 #endif
           } else if (insts[ this_ctx->last_inst ].category == XED_CATEGORY_SYSRET) {
-#if 0
+#if 1
             if (this_ctx->call_stack_idx >= 1u) {
               unsigned long long int ret;
 
@@ -1299,27 +1257,17 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
     fprintf(stdout, "XED Instruction %16llx found in range %16llx - %16llx\n", addr, vm_kernel_me, 0xFFFFFFFFFFFFFFFFllu);
     return NULL;
   }
-  if ((addr >= vm_kernel_ks) && (unwind_cache_high[ addr & CACHE_MASK ] != NULL) && (unwind_cache_high[ addr & CACHE_MASK ]->addr == addr)) {
-    return unwind_cache_high[ addr & CACHE_MASK ];
+  if ((addr >= vm_kernel_ks) && (unwind_cache_ks[ addr & CACHE_MASK ] != NULL) && (unwind_cache_ks[ addr & CACHE_MASK ]->addr == addr)) {
+    return unwind_cache_ks[ addr & CACHE_MASK ];
   }
 #endif
-  if ((unwind_cache_low[ addr & CACHE_MASK ] != NULL) && (unwind_cache_low[ addr & CACHE_MASK ]->addr == addr)) {
-    return unwind_cache_low[ addr & CACHE_MASK ];
+  if ((unwind_cache_us[ addr & CACHE_MASK ] != NULL) && (unwind_cache_us[ addr & CACHE_MASK ]->addr == addr)) {
+    return unwind_cache_us[ addr & CACHE_MASK ];
   }
 
-  signed long long int        a = 0ll;
-  signed long long int        b = ((signed long long int) (no_insts - 1llu));
-  static signed long long int m = 0ll;
-
-  if (m != 0ll) {
-    if ((insts[ m ].addr <= addr) && (addr <= insts[ m ].addr + insts[ m ].length - 1llu)) {
-      return &insts[ m ];
-    } else if (insts[ m ].addr < addr) {
-      a = m + 1ll;
-    } else {
-      b = m - 1ll;
-    }
-  }
+  signed long long int a = 0ll;
+  signed long long int b = ((signed long long int) (no_insts - 1llu));
+  signed long long int m = 0ll;
 
   while (a <= b) {
     m = (a + b) / 2ll;
@@ -1327,12 +1275,12 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
     if ((insts[ m ].addr <= addr) && (addr <= insts[ m ].addr + insts[ m ].length - 1llu)) {
 #if defined(EN_VMLINUX)
       if (addr >= vm_kernel_ks) {
-        unwind_cache_high[ addr & CACHE_MASK ] = &insts[ m ];
+        unwind_cache_ks[ addr & CACHE_MASK ] = &insts[ m ];
       } else {
-        unwind_cache_low[ addr & CACHE_MASK ]  = &insts[ m ];
+        unwind_cache_us[ addr & CACHE_MASK ] = &insts[ m ];
       }
 #else
-      unwind_cache_low[ addr & CACHE_MASK ] = &insts[ m ];
+      unwind_cache_us[ addr & CACHE_MASK ] = &insts[ m ];
 #endif
 
       return &insts[ m ];
@@ -1346,9 +1294,49 @@ const inst_t* xed_unwind_find_inst(const unsigned long long int addr) {
 }
 
 #if defined(EN_PTRACE_UNWIND)
-void xed_unwind(void) {
-  print_unwind(branches_fp);
-  print_call_stack(branches_fp);
+void xed_unwind(const double tsc) {
+  unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
+  const double          ptrace_tsc   = ((double) (unwind_insts->ptrace_tsc));
+  const double          attach_tsc   = ((double) (unwind_insts->attach_tsc));
+  const double          detach_tsc   = ((double) (unwind_insts->detach_tsc));
+
+  if (unwind_insts->no_insts == 0u) {
+    return;
+  }
+
+  if (tsc >= ptrace_tsc) {
+    fprintf(branches_fp, "PT :: %20.2lf %6u\n", ptrace_tsc, unwind_queue_tail); unwind_insts->ptrace_tsc = ULLONG_MAX;
+  }
+  if (tsc >= attach_tsc) {
+    extern char perfed_name[ ];
+
+    fprintf(branches_fp, "AT :: %20.2lf %6u\n", attach_tsc, unwind_queue_tail); unwind_insts->attach_tsc = ULLONG_MAX;
+    fprintf(branches_fp,
+            "%s\t%d [%03d] %20.2lf: cpu-clock: %6u %6u\n",
+            &perfed_name[ 0u ],
+            0,
+            0,
+            0.0,
+            unwind_queue_tail,
+            unwind_queue_head);
+    for (unsigned int i = 0u; i < unwind_insts->no_insts; i++) {
+      const inst_t* const inst = unwind_insts->insts[ i ];
+
+      fprintf(branches_fp,
+              "\t%16llx %08llx_%s ([%s %016llx])\n",
+              inst->addr,
+              inst->addr - inst->base_addr,
+              inst->binary,
+              inst->binary,
+              inst->dwarf_unwind->addr - inst->dwarf_unwind->base_addr);
+    }
+    fprintf(branches_fp, "DT :: %20.2lf %6u\n", detach_tsc, unwind_queue_tail); unwind_insts->detach_tsc = ULLONG_MAX;
+
+    memset(unwind_insts, 0, sizeof(unwind_insts_t));
+    unwind_queue_tail = (unwind_queue_tail + 1u) % UNWIND_QUEUE_LEN;
+
+    print_call_stack(branches_fp);
+  }
 }
 
 const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr) {

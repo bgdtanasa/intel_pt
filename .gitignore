@@ -6,6 +6,9 @@ resources/insts/insts*
 resources/addr2lines/addr2line*
 resources
 
+examples/*
+examples
+
 src/*.d
 src/*.o
 

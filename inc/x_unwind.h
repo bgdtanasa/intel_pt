@@ -14,6 +14,7 @@ typedef struct {
   unsigned int           no_insts;
   const inst_t*          insts[ MAX_NO_UNWIND_INSTS ];
 
+  unsigned long long int ptrace_tsc;
   unsigned long long int attach_tsc;
   unsigned long long int detach_tsc;
 } unwind_insts_t;
@@ -27,7 +28,6 @@ extern void perfed_unwind(const int perfed_pid);
 extern unwind_insts_t* unwind(const int                            perfed_pid,
                               const struct user_regs_struct* const uregs);
 extern unsigned int drop_unwinds(const double a, const double b);
-extern void print_unwind(FILE* const fp);
 
 extern void unwind_close(void);
 

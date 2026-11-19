@@ -182,7 +182,7 @@ unsigned long long int execute_dwarf_cfa_exp(const void* const      exp,
       case X_DWARF_DEREF: {
         if (stk_idx >= 1u) {
           const unsigned long long int perfed_x  = stk[ stk_idx - 1u ];
-          const unsigned long long int perfing_x = kmod_find_addr(perfed_x);
+          const unsigned long long int perfing_x = kmod_find_stk_addr(perfed_x);
 
           if (perfing_x != 0llu) {
             stk_idx--;
@@ -267,7 +267,7 @@ unsigned long long int execute_dwarf_cfa_exp(const void* const      exp,
 unsigned long long int execute_dwarf_reg_exp(const void* const      exp,
                                              unsigned long long int cfa_regs[ MAX_NO_REGS ]) {
   const unsigned long long int perfed_x  = execute_dwarf_cfa_exp(exp, cfa_regs);
-  const unsigned long long int perfing_x = kmod_find_addr(perfed_x);
+  const unsigned long long int perfing_x = kmod_find_stk_addr(perfed_x);
 
   if (perfing_x != 0llu) {
     return *((unsigned long long int*) (perfing_x));

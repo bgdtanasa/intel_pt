@@ -8,6 +8,7 @@
 #if defined(EN_PTRACE_UNWIND)
 #include "x_unwind.h"
 #endif
+#include "utils.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -544,14 +545,7 @@ static void record_intel_pt_pkt(intel_pt_pkt_type_t           type,
   }
 #endif
 #if defined(EN_PTRACE_UNWIND)
-  {
-    unwind_insts_t* const unwind_insts = &unwind_queue[ unwind_queue_tail ];
-    const double          attach_tsc   = ((double) (unwind_insts->attach_tsc));
-
-    if ((unwind_insts->no_insts >= 1u) && (tsc_approx_ref >= attach_tsc)) {
-      xed_unwind();
-    }
-  }
+  xed_unwind(tsc_approx_ref);
 #endif
 
 #if defined(INTEL_PT_PRINT)
@@ -781,6 +775,7 @@ static unsigned long long int intel_pt_decode_online(const volatile unsigned cha
 #else
                                                      const unsigned long long int     h __attribute__((unused)),
                                                      volatile unsigned long long int* h_p __attribute__((unused))) {
+  const perfed_status_t prev_perfed_status = perfed_status;
 #endif
 #if defined(INTEL_PT_DBG)
   const volatile unsigned char* x_orig = x;
@@ -791,8 +786,13 @@ static unsigned long long int intel_pt_decode_online(const volatile unsigned cha
   const volatile unsigned short int* x_16;
   const volatile unsigned char*      x_8;
 
+  perfed_status = PERFED_STATUS_RUNNING_DECODING;
 decode_again:
   if (n >= 1llu) {
+    if (perfed_status != PERFED_STATUS_RUNNING_DECODING) {
+      fprintf(stdout, "Skipping Intel PT at %20.2lf due to %d ...\n", ((double) (read_tsc())), perfed_status);
+      return n;
+    }
 #if defined(INTEL_PT_DBG)
     if ((last_intel_pt_pkt != NULL) && (last_intel_pt_pkt->type != INTEL_PT_PKT_NONE) && (last_intel_pt_pkt->x != NULL) && (*last_intel_pt_pkt->x != last_intel_pt_pkt->y)) {
       fprintf(stdout,
@@ -1307,6 +1307,7 @@ cyc_again:
     fprintf(stderr, "1 intel_pt_decode error\n"); for (;;) { }
   }
 
+  perfed_status = prev_perfed_status;
   return n;
 }
 

@@ -204,7 +204,7 @@ extern void xed_tsc_err(const double tsc_err);
 
 extern const inst_t*         xed_unwind_find_inst(const unsigned long long int addr);
 #if defined(EN_PTRACE_UNWIND)
-extern void                  xed_unwind(void);
+extern void                  xed_unwind(const double tsc);
 extern const dwarf_unwind_t* xed_unwind_find_dwarf(const unsigned long long int addr);
 extern void                  xed_unwind_link_inst_to_dwarf(void);
 #endif

@@ -221,20 +221,14 @@ typedef union {
   perf_record_switch_wide_t  record_switch_wide;
 } perf_record_t;
 
-typedef enum {
-  PERFED_STATUS_RUNNING = 0,
-  PERFED_STATUS_PTRACED
-} perfed_status_t;
+volatile perfed_status_t perfed_status = PERFED_STATUS_RUNNING;
 
-perfed_status_t perfed_status = PERFED_STATUS_RUNNING;
-char            perfed_name[ TASK_COMM_LEN ];
-static pid_t    perfed_pid;
-static int      perfed_cpu;
-static int      perfed_msr_fd;
-static int      perfing_cpu;
-static int      perfing_fd;
-
-static volatile unsigned int perfing_is_running;
+char         perfed_name[ TASK_COMM_LEN ];
+static pid_t perfed_pid;
+static int   perfed_cpu;
+static int   perfed_msr_fd;
+static int   perfing_cpu;
+static int   perfing_fd;
 
 static struct perf_event_mmap_page* perf_metadata;
 static __u8*                        perf_data_buffer;
@@ -336,11 +330,11 @@ static void* perfing_main(void* args __attribute__((unused))) {
 
     int status;
 #if defined(EN_PTRACE_UNWIND)
+    unsigned long long int perfed_ptrace_tsc;
     unsigned long long int perfed_attach_tsc;
     unsigned long long int perfed_detach_tsc;
 #endif
 
-    perfing_is_running = 1u;
     fprintf(stdout,
             "perfing from cpu %2d via fd %2d on pid %6d at cpu %2d\n",
             perfing_cpu,
@@ -360,15 +354,22 @@ static void* perfing_main(void* args __attribute__((unused))) {
         if (WIFSTOPPED(status)) {
           perfed_kmod(perfed_pid);
           ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
-
-#if defined(EN_VMLINUX)
-          parse_vmlinux();
-#endif
         }
       } else {
         fprintf(stderr, "waitpid failed :: %d vs %d\n", perfed_pid, perfed_pid_wait); for (;;) {}
       }
     }
+    perfed_xed(perfed_pid);
+    perfed_proc(perfed_pid, NULL);
+#if defined(EN_VMLINUX)
+    parse_vmlinux();
+#endif
+#if defined(EN_PMU)
+    perfed_pmu(perfed_pid, perfed_cpu, perfing_fd);
+#endif
+#if defined(EN_PTRACE_UNWIND)
+    perfed_unwind(perfed_pid);
+#endif
 #if defined(EN_PTRACE_BRK)
     perfed_brks(perfed_pid);
 #endif
@@ -464,6 +465,8 @@ static void* perfing_main(void* args __attribute__((unused))) {
               if ((perfed_status == PERFED_STATUS_RUNNING) && (intel_pt_status == INTEL_PT_STATUS_ENABLE) && (unwind_queue[ unwind_queue_head ].no_insts == 0u)) {
                 long ret;
 
+                perfed_ptrace_tsc = read_tsc();
+
                 errno = 0;
                 ret   = ptrace(PTRACE_ATTACH, perfed_pid, NULL, NULL);
                 if (ret == -1l) {
@@ -476,14 +479,17 @@ static void* perfing_main(void* args __attribute__((unused))) {
                       unwind_insts_t* unwind_insts = NULL;
 
                       perfed_attach_tsc = read_tsc();
-                      perfed_status     = PERFED_STATUS_PTRACED;
+                      perfed_status     = PERFED_STATUS_RUNNING_PTRACING;
 
                       errno = 0;
                       ret   = ptrace(PTRACE_GETREGS, perfed_pid, NULL, &ptrace_uregs);
                       if (ret == -1l) {
                         fprintf(stderr, "PTRACE_GETREGS failed %s\n", strerror(errno)); for (;;) {}
                       } else {
+                        //const unsigned long long u = read_tsc();
+
                         unwind_insts = unwind(perfed_pid, &ptrace_uregs);
+                        //fprintf(stdout, "unwinding %6u frames in %12.2lf us\n", unwind_insts->no_insts, ((double) (read_tsc() - u)) * tsc_hz_ns / 1000.0);
                       }
                       errno = 0;
                       ret   = ptrace(PTRACE_DETACH, perfed_pid, NULL, NULL);
@@ -495,6 +501,7 @@ static void* perfing_main(void* args __attribute__((unused))) {
                       perfed_status     = PERFED_STATUS_RUNNING;
 
                       if (unwind_insts != NULL) {
+                        unwind_insts->ptrace_tsc = perfed_ptrace_tsc;
                         unwind_insts->attach_tsc = perfed_attach_tsc;
                         unwind_insts->detach_tsc = perfed_detach_tsc;
 
@@ -531,7 +538,7 @@ static void* perfing_main(void* args __attribute__((unused))) {
 
               if (perf_record->record_aux.flags == 0llu) {
                 if (((rc_aux_offset % aux_size) + rc_aux_size) >= aux_size) {
-                  __u64     j     = 0llu;
+                  __u64       j   = 0llu;
                   const __u64 j_a = AUX_ALIGNMENT * (rc_aux_size / AUX_ALIGNMENT);
                   const __u64 j_b = rc_aux_size % AUX_ALIGNMENT;
 
@@ -585,8 +592,7 @@ static void* perfing_main(void* args __attribute__((unused))) {
                 __atomic_store_n(&perf_metadata->aux_tail, rc_aux_offset + rc_aux_size, __ATOMIC_RELEASE);
               }
               if (perf_record->record_aux.flags != 0llu) {
-                fprintf(stdout, "AUX FLAGS = %04llx\n", perf_record->record_aux.flags);
-                perfing_is_running = 2u;
+                perfed_status = PERFED_STATUS_FULL_AUX_BUFFER;
               }
             } break;
 
@@ -678,16 +684,12 @@ do_switch_util:
         }
       }
 
-      if (perfing_is_running == 0u) {
-        fprintf(stdout, "Killing Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
+      if (perfed_status != PERFED_STATUS_RUNNING) {
+        fprintf(stdout, "Disabling Intel PT at %20.2lf due to %d ...\n", ((double) (read_tsc())), perfed_status);
 
         fprintf(stdout, "no_record_aux = %u\n", no_record_aux);
         fprintf(stdout, "sz_record_aux = %llu MB\n", sz_record_aux / ONE_MB);
 
-        break;
-      } else if (perfing_is_running == 2u) {
-        fprintf(stdout, "Disabling Intel PT at %20.2lf ...\n", ((double) (read_tsc())));
-        perfing_is_running = 1u;
         break;
       }
     }
@@ -709,13 +711,13 @@ do_switch_util:
 #if defined(EN_PMU)
   pmu_close();
 #endif
-  kmod_close();
 #if defined(EN_PTRACE_UNWIND)
   unwind_close();
 #endif
 #if defined(EN_PTRACE_BRK)
   brk_close();
 #endif
+  kmod_close();
 
   pthread_exit(NULL);
 }
@@ -817,14 +819,6 @@ static void perfed_setup(void) {
                  perfing_fd,
                  perf_metadata->aux_offset);
         if (p != MAP_FAILED) {
-          perfed_xed(perfed_pid);
-          perfed_proc(perfed_pid, NULL);
-#if defined(EN_PMU)
-          perfed_pmu(perfed_pid, perfed_cpu, perfing_fd);
-#endif
-#if defined(EN_PTRACE_UNWIND)
-          perfed_unwind(perfed_pid);
-#endif
           perfed_msr();
 
           fprintf(stdout, "perf_metadata->data_head   = %10llu\n", perf_metadata->data_head);
@@ -853,32 +847,22 @@ static void perfed_setup(void) {
   }
 }
 
-static void sig_action_SIGSEGV(int sig_no, siginfo_t* sig_info, void* u_ctx) {
-  (void) (sig_no);
-  (void) (sig_info);
-  (void) (u_ctx);
+static void sig_action_SIGSEGV(int sig_no __attribute__((unused)), siginfo_t* sig_info __attribute__((unused)), void* u_ctx __attribute__((unused))) {
 }
 
-static void sig_action_SIGINT(int sig_no, siginfo_t* sig_info, void* u_ctx) {
-  (void) (sig_no);
-  (void) (sig_info);
-  (void) (u_ctx);
+static void sig_action_SIGINT(int sig_no __attribute__((unused)), siginfo_t* sig_info __attribute__((unused)), void* u_ctx __attribute__((unused))) {
+  fprintf(stdout, "SIG = %s\n", "Ctrl + C");
 
-  perfing_is_running = 0u;
+  perfed_status = PERFED_STATUS_SIG_INT;
 }
 
-static void sig_action_SIGRT(int sig_no, siginfo_t* sig_info, void* u_ctx) {
-  (void) (sig_info);
-  (void) (u_ctx);
-
+static void sig_action_SIGRT(int sig_no, siginfo_t* sig_info __attribute__((unused)), void* u_ctx __attribute__((unused))) {
   if (sig_no == SIGRTMIN + 0) {
     fprintf(stdout, "SIG = %s\n", "New executable mapping");
 
-    perfing_is_running = 2u;
+    perfed_status = PERFED_STATUS_SIG_NEW_EXEC_MAPPING;
   } else if (sig_no == SIGRTMIN + 1) {
     fprintf(stdout, "SIG = %s\n", "New possible stack");
-
-    redo_kmaps++;
   } else if (sig_no == SIGRTMAX) {
     fprintf(stdout, "SIG = %s\n", "New mapping");
   } else {

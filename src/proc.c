@@ -13,9 +13,6 @@
 
 #include <linux/kernel-page-flags.h>
 
-amaps_t      amaps;
-unsigned int no_amaps;
-
 static char buffer[ 512u ];
 
 static void parse_pagemap(const int                    perfed_pid,
@@ -110,30 +107,23 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
           }
           line[ strlen(line) - 1 ] = '\0';
           {
-            const char* const binary = basename(line);
+            const char* binary = basename(line);
 
             if ((binary == NULL) || (strlen(binary) == 0)) {
-              fprintf(stdout, "Anonymous executable mapping %16llx - %16llx %s\n", a, b, line);
+              static unsigned int no_anons = 0u;
+              static char         anon[ ]  = { 'a', 'n', 'o', 'n', '_', 'x', 'x', 'x', '\0', '\0' };
 
-              amaps[ no_amaps ] = (amap_t) {
-                .a = a,
-                .b = b
-              };
-              no_amaps++;
-              if (no_amaps >= MAX_NO_AMAPS) {
-                fprintf(stderr, "Not enough space to load the anonymous mappings\n"); for (;;) {}
-              }
-            } else {
-              if (parse_get_binary(binary, 0u) == NULL) {
-                const unsigned int           is_pie    = binary_is_pie(line);
-                const unsigned long long int base_addr = (is_pie == 1u) ? (a - o) : (0llu);
+              sprintf(&anon[ 0u ], "anon_%03u", no_anons); no_anons++;
+              binary = &anon[ 0u ];
+            }
+            if (parse_get_binary(binary, 0u) == NULL) {
+              const unsigned int           is_pie    = binary_is_pie(line);
+              const unsigned long long int base_addr = (is_pie == 1u) ? (a - o) : (0llu);
 
-                fprintf(stdout, "%48s %16llx %08x %u :: ", binary, base_addr, o, is_pie);
 #if defined(EN_PTRACE_UNWIND)
-                parse_dwarf(binary, base_addr);
+              parse_dwarf(binary, base_addr);
 #endif
-                parse_objdump(perfed_pid, binary, base_addr);
-              }
+              parse_objdump(perfed_pid, binary, base_addr);
             }
           }
         }
@@ -153,10 +143,7 @@ void perfed_proc(const int perfed_pid, struct user_regs_struct* regs) {
 #endif
     fclose(fp);
   } else {
-    fprintf(stderr,
-            "fopen(%s) failed :: %s\n",
-            &buffer[ 0u ],
-            strerror(errno)); for (;;) {}
+    fprintf(stderr, "fopen(%s) failed :: %s\n", &buffer[ 0u ], strerror(errno)); for (;;) {}
   }
 }
 
